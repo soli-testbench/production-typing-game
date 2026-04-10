@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, ensureMigrations } from '@/lib/db';
+import { query, ensureMigrations, isConnectionError, sanitizeErrorMessage } from '@/lib/db';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { checkDurationRateLimit } from '@/lib/duration-rate-limit';
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20).trim();
@@ -74,6 +75,56 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'incorrectChars must be a non-negative number' }, { status: 400 });
     }
 
+    // Cross-validate: zero correct chars but non-zero WPM is impossible
+    if (correctChars === 0 && wpm > 0) {
+      return NextResponse.json(
+        { error: 'Invalid submission: WPM must be 0 when correctChars is 0' },
+        { status: 400 }
+      );
+    }
+
+    // Cross-validate: zero correct chars but 100% accuracy is impossible (unless no chars typed at all)
+    if (correctChars === 0 && incorrectChars > 0 && accuracy > 0) {
+      return NextResponse.json(
+        { error: 'Invalid submission: accuracy must be 0 when there are no correct characters but there are incorrect characters' },
+        { status: 400 }
+      );
+    }
+
+    // Cross-validate WPM against character counts and duration
+    if (correctChars > 0) {
+      const expectedWpm = (correctChars / 5) / (durationSeconds / 60);
+      const wpmDeviation = Math.abs(wpm - expectedWpm) / expectedWpm;
+      if (wpmDeviation > 0.15) {
+        return NextResponse.json(
+          { error: `Invalid submission: WPM (${wpm}) does not match expected value based on correct characters (${correctChars}) and duration (${durationSeconds}s). Expected approximately ${Math.round(expectedWpm)} WPM (±15% tolerance).` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Cross-validate accuracy against character counts
+    const totalChars = correctChars + incorrectChars;
+    if (totalChars > 0) {
+      const expectedAccuracy = (correctChars / totalChars) * 100;
+      const accuracyDeviation = Math.abs(accuracy - expectedAccuracy);
+      if (accuracyDeviation > 3) {
+        return NextResponse.json(
+          { error: `Invalid submission: accuracy (${accuracy}%) does not match expected value based on character counts. Expected approximately ${Math.round(expectedAccuracy)}% (±3% tolerance).` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Duration-aware rate limiting: prevent submitting faster than test duration allows
+    const durationRateCheck = checkDurationRateLimit(ip, durationSeconds);
+    if (!durationRateCheck.allowed) {
+      return NextResponse.json(
+        { error: `Submission too frequent for a ${durationSeconds}s test. Try again in ${durationRateCheck.retryAfter} seconds.` },
+        { status: 429, headers: { 'Retry-After': String(durationRateCheck.retryAfter) } }
+      );
+    }
+
     await ensureMigrations();
 
     // Create or retrieve player
@@ -99,7 +150,10 @@ export async function POST(request: NextRequest) {
       id: gameResult.rows[0].id,
     }, { status: 201 });
   } catch (error) {
-    console.error('Error saving score:', error);
+    console.error('Error saving score:', sanitizeErrorMessage(error));
+    if (isConnectionError(error)) {
+      return NextResponse.json({ error: 'Database is temporarily unavailable. Please try again later.' }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -128,7 +182,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ scores: result.rows });
   } catch (error) {
-    console.error('Error fetching scores:', error);
+    console.error('Error fetching scores:', sanitizeErrorMessage(error));
+    if (isConnectionError(error)) {
+      return NextResponse.json({ error: 'Database is temporarily unavailable. Please try again later.' }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
