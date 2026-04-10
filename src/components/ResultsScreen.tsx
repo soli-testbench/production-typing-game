@@ -7,6 +7,7 @@ import { NameEntryModal } from '@/components/NameEntryModal';
 interface PersonalBestInfo {
   isNewBest: boolean;
   isFirstScore: boolean;
+  isTied: boolean;
   improvement: number;
 }
 
@@ -231,6 +232,18 @@ function PersonalBestBanner({ info }: { info: PersonalBestInfo }) {
     );
   }
 
+  if (info.isTied) {
+    return (
+      <div className="mb-6 animate-slide-up">
+        <div className="bg-neon-yellow/10 border border-neon-yellow/30 rounded-xl p-4 text-center">
+          <div className="text-2xl mb-1">🎯</div>
+          <p className="text-neon-yellow font-bold text-lg">Tied Your Personal Best!</p>
+          <p className="text-gray-400 text-sm mt-1">Keep pushing to beat your record</p>
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -243,11 +256,29 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   const saveAttemptedRef = useRef(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared' | 'error'>('idle');
   const [personalBest, setPersonalBest] = useState<PersonalBestInfo | null>(null);
-  const personalBestCheckedRef = useRef(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const maxRetries = 3;
 
-  const saveScore = useCallback(async () => {
-    if (saveAttemptedRef.current || saved) return;
-    saveAttemptedRef.current = true;
+  // Cleanup retry timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const saveScore = useCallback(async (attempt = 0) => {
+    if (saved) return;
+    if (attempt === 0) {
+      if (saveAttemptedRef.current) return;
+      saveAttemptedRef.current = true;
+    }
+    if (attempt > 0) {
+      setRetrying(true);
+    }
     setSaving(true);
     setSaveError('');
     try {
@@ -266,18 +297,77 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
           incorrectChars: result.incorrectChars,
         }),
       });
+
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to save score');
+        const data = await res.json().catch(() => ({ error: 'Failed to save score' }));
+        const status = res.status;
+
+        // Non-retryable errors
+        if (status === 400 || status === 422) {
+          throw { message: data.error || 'Validation error', retryable: false };
+        }
+
+        // Rate limit: respect Retry-After header
+        if (status === 429) {
+          const retryAfter = parseInt(res.headers.get('Retry-After') || '5', 10);
+          if (attempt < maxRetries) {
+            const delay = retryAfter * 1000;
+            setRetryCount(attempt + 1);
+            setRetrying(true);
+            setSaving(false);
+            retryTimeoutRef.current = setTimeout(() => {
+              saveScore(attempt + 1);
+            }, delay);
+            return;
+          }
+          throw { message: data.error || 'Rate limit exceeded', retryable: false };
+        }
+
+        // Retryable server errors (503, 500, etc.)
+        throw { message: data.error || 'Failed to save score', retryable: true };
       }
+
+      const data = await res.json();
+
+      // Use the personal best info from the save response (Task 1)
+      const previousBestWpm: number | null = data.personalBest?.previousBestWpm ?? null;
+      if (previousBestWpm === null) {
+        setPersonalBest({ isNewBest: false, isFirstScore: true, isTied: false, improvement: 0 });
+      } else if (result.wpm > previousBestWpm) {
+        setPersonalBest({ isNewBest: true, isFirstScore: false, isTied: false, improvement: result.wpm - previousBestWpm });
+      } else if (result.wpm === previousBestWpm) {
+        setPersonalBest({ isNewBest: false, isFirstScore: false, isTied: true, improvement: 0 });
+      }
+      // If result.wpm < previousBestWpm, no personal best banner is shown
+
       setSaved(true);
+      setRetrying(false);
+      setRetryCount(0);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save score');
+      const error = err as { message?: string; retryable?: boolean };
+      const errorMessage = error.message || 'Failed to save score';
+      const isRetryable = error.retryable !== false;
+      const isNetworkError = err instanceof TypeError; // fetch network errors
+
+      if ((isRetryable || isNetworkError) && attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+        setRetryCount(attempt + 1);
+        setRetrying(true);
+        setSaving(false);
+        retryTimeoutRef.current = setTimeout(() => {
+          saveScore(attempt + 1);
+        }, delay);
+        return;
+      }
+
+      setSaveError(errorMessage);
       saveAttemptedRef.current = false;
+      setRetrying(false);
+      setRetryCount(0);
     } finally {
       setSaving(false);
     }
-  }, [playerName, anonymousId, result, saved]);
+  }, [playerName, anonymousId, result, saved, maxRetries]);
 
   // Auto-save when name is set
   useEffect(() => {
@@ -285,64 +375,6 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
       saveScore();
     }
   }, [isNameSet, saved, saveScore]);
-
-  // Check for personal best
-  useEffect(() => {
-    if (!isNameSet || personalBestCheckedRef.current) return;
-    personalBestCheckedRef.current = true;
-
-    const checkPersonalBest = async () => {
-      try {
-        const res = await fetch(`/api/scores?anonymousId=${encodeURIComponent(anonymousId)}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const scores = data.scores || [];
-
-        // Filter scores for the same duration, excluding any that were just saved
-        // (the current score may or may not be in the list depending on timing)
-        const previousScores = scores.filter(
-          (s: { duration_seconds: number; wpm: number }) =>
-            s.duration_seconds === result.duration
-        );
-
-        if (previousScores.length === 0) {
-          // This will be the first score at this duration
-          setPersonalBest({ isNewBest: false, isFirstScore: true, improvement: 0 });
-        } else {
-          // Find the best previous WPM (could include the current score if already saved)
-          const bestPreviousWpm = Math.max(
-            ...previousScores.map((s: { wpm: number }) => s.wpm)
-          );
-
-          // If current WPM exceeds best found, check if it truly beats previous
-          // (best might include the current score if auto-save happened first)
-          const previousOnlyScores = previousScores.filter(
-            (s: { wpm: number }) => s.wpm !== result.wpm
-          );
-
-          if (previousOnlyScores.length === 0) {
-            // Only score is likely the current one
-            setPersonalBest({ isNewBest: false, isFirstScore: true, improvement: 0 });
-          } else {
-            const truePreviousBest = Math.max(
-              ...previousOnlyScores.map((s: { wpm: number }) => s.wpm)
-            );
-            if (result.wpm > truePreviousBest) {
-              setPersonalBest({
-                isNewBest: true,
-                isFirstScore: false,
-                improvement: result.wpm - truePreviousBest,
-              });
-            }
-          }
-        }
-      } catch {
-        // Silently fail - personal best notification is non-critical
-      }
-    };
-
-    checkPersonalBest();
-  }, [isNameSet, anonymousId, result.duration, result.wpm]);
 
   // Keyboard shortcuts for results screen
   useEffect(() => {
@@ -463,10 +495,10 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         <div className="text-center mb-6">
           <button
             onClick={handleSaveClick}
-            disabled={saving}
+            disabled={saving || retrying}
             className="px-6 py-2.5 bg-neon-blue/20 text-neon-blue border border-neon-blue/30 rounded-lg hover:bg-neon-blue/30 transition-colors disabled:opacity-50 font-medium"
           >
-            {saving ? 'Saving...' : 'Save Score to Leaderboard'}
+            {retrying ? `Retrying... (${retryCount}/${maxRetries})` : saving ? 'Saving...' : 'Save Score to Leaderboard'}
           </button>
           {saveError && <p className="text-red-400 text-sm mt-2">{saveError}</p>}
         </div>

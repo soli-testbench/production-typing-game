@@ -233,6 +233,14 @@ export default function StatsPage() {
   const totalTimeSeconds = scores.reduce((sum, s) => sum + s.duration_seconds, 0);
   const totalMinutes = Math.floor(totalTimeSeconds / 60);
 
+  // Average WPM and accuracy
+  const averageWpm = totalGames > 0
+    ? Math.round(scores.reduce((sum, s) => sum + s.wpm, 0) / totalGames)
+    : 0;
+  const averageAccuracy = totalGames > 0
+    ? (scores.reduce((sum, s) => sum + Number(s.accuracy), 0) / totalGames).toFixed(1)
+    : '0.0';
+
   // WPM trend: chronological order (oldest to newest), last 20+ games
   const chronological = [...scores].reverse();
   const trendGames = chronological.slice(-Math.max(20, chronological.length));
@@ -285,7 +293,7 @@ export default function StatsPage() {
       {!loading && !error && scores.length > 0 && (
         <>
           {/* Summary Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-2 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-gray-900/80 border border-neon-blue/20 rounded-xl p-4 text-center">
               <div className="text-4xl font-bold text-neon-blue">{totalGames}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Games Played</div>
@@ -293,6 +301,14 @@ export default function StatsPage() {
             <div className="bg-gray-900/80 border border-neon-purple/20 rounded-xl p-4 text-center">
               <div className="text-4xl font-bold text-neon-purple">{totalMinutes}m</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Time Typing</div>
+            </div>
+            <div className="bg-gray-900/80 border border-neon-green/20 rounded-xl p-4 text-center">
+              <div className="text-4xl font-bold text-neon-green">{averageWpm}</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Average WPM</div>
+            </div>
+            <div className="bg-gray-900/80 border border-neon-yellow/20 rounded-xl p-4 text-center">
+              <div className="text-4xl font-bold text-neon-yellow">{averageAccuracy}%</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Average Accuracy</div>
             </div>
           </div>
 
