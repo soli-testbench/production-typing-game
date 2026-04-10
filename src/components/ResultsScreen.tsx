@@ -4,6 +4,12 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
 import { NameEntryModal } from '@/components/NameEntryModal';
 
+interface PersonalBestInfo {
+  isNewBest: boolean;
+  isFirstScore: boolean;
+  improvement: number;
+}
+
 interface GameResult {
   wpm: number;
   rawWpm: number;
@@ -200,6 +206,34 @@ function WpmChart({ samples, averageWpm }: { samples: number[]; averageWpm: numb
   );
 }
 
+function PersonalBestBanner({ info }: { info: PersonalBestInfo }) {
+  if (info.isFirstScore) {
+    return (
+      <div className="mb-6 animate-slide-up">
+        <div className="bg-neon-blue/10 border border-neon-blue/30 rounded-xl p-4 text-center">
+          <div className="text-2xl mb-1">🌟</div>
+          <p className="text-neon-blue font-bold text-lg">First score at this duration!</p>
+          <p className="text-gray-400 text-sm mt-1">Keep playing to set your personal best</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (info.isNewBest) {
+    return (
+      <div className="mb-6 animate-slide-up">
+        <div className="bg-neon-green/10 border border-neon-green/30 rounded-xl p-4 text-center">
+          <div className="text-2xl mb-1">🎉</div>
+          <p className="text-neon-green font-bold text-lg neon-text">New Personal Best!</p>
+          <p className="text-neon-yellow text-sm mt-1 font-medium">+{info.improvement} WPM over your previous best</p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps) {
   const { playerName, anonymousId, isNameSet } = usePlayer();
   const [showNameModal, setShowNameModal] = useState(false);
@@ -208,6 +242,8 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   const [saveError, setSaveError] = useState('');
   const saveAttemptedRef = useRef(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared' | 'error'>('idle');
+  const [personalBest, setPersonalBest] = useState<PersonalBestInfo | null>(null);
+  const personalBestCheckedRef = useRef(false);
 
   const saveScore = useCallback(async () => {
     if (saveAttemptedRef.current || saved) return;
@@ -249,6 +285,64 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
       saveScore();
     }
   }, [isNameSet, saved, saveScore]);
+
+  // Check for personal best
+  useEffect(() => {
+    if (!isNameSet || personalBestCheckedRef.current) return;
+    personalBestCheckedRef.current = true;
+
+    const checkPersonalBest = async () => {
+      try {
+        const res = await fetch(`/api/scores?anonymousId=${encodeURIComponent(anonymousId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const scores = data.scores || [];
+
+        // Filter scores for the same duration, excluding any that were just saved
+        // (the current score may or may not be in the list depending on timing)
+        const previousScores = scores.filter(
+          (s: { duration_seconds: number; wpm: number }) =>
+            s.duration_seconds === result.duration
+        );
+
+        if (previousScores.length === 0) {
+          // This will be the first score at this duration
+          setPersonalBest({ isNewBest: false, isFirstScore: true, improvement: 0 });
+        } else {
+          // Find the best previous WPM (could include the current score if already saved)
+          const bestPreviousWpm = Math.max(
+            ...previousScores.map((s: { wpm: number }) => s.wpm)
+          );
+
+          // If current WPM exceeds best found, check if it truly beats previous
+          // (best might include the current score if auto-save happened first)
+          const previousOnlyScores = previousScores.filter(
+            (s: { wpm: number }) => s.wpm !== result.wpm
+          );
+
+          if (previousOnlyScores.length === 0) {
+            // Only score is likely the current one
+            setPersonalBest({ isNewBest: false, isFirstScore: true, improvement: 0 });
+          } else {
+            const truePreviousBest = Math.max(
+              ...previousOnlyScores.map((s: { wpm: number }) => s.wpm)
+            );
+            if (result.wpm > truePreviousBest) {
+              setPersonalBest({
+                isNewBest: true,
+                isFirstScore: false,
+                improvement: result.wpm - truePreviousBest,
+              });
+            }
+          }
+        }
+      } catch {
+        // Silently fail - personal best notification is non-critical
+      }
+    };
+
+    checkPersonalBest();
+  }, [isNameSet, anonymousId, result.duration, result.wpm]);
 
   // Keyboard shortcuts for results screen
   useEffect(() => {
@@ -317,6 +411,9 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         <span className="text-neon-blue">Test</span>{' '}
         <span className="text-gray-300">Complete</span>
       </h2>
+
+      {/* Personal Best Notification */}
+      {isNameSet && personalBest && <PersonalBestBanner info={personalBest} />}
 
       {/* Main Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

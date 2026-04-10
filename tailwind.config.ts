@@ -18,7 +18,7 @@ const config: Config = {
         },
       },
       fontFamily: {
-        mono: ['Fira Code', 'JetBrains Mono', 'Consolas', 'monospace'],
+        mono: ['var(--font-fira-code)', 'Fira Code', 'JetBrains Mono', 'Consolas', 'monospace'],
       },
       animation: {
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',

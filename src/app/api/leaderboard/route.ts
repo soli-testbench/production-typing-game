@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, ensureMigrations } from '@/lib/db';
+import { query, ensureMigrations, isConnectionError, sanitizeErrorMessage } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   try {
@@ -63,7 +63,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ leaderboard });
   } catch (error) {
-    console.error('Error fetching leaderboard:', error);
+    console.error('Error fetching leaderboard:', sanitizeErrorMessage(error));
+    if (isConnectionError(error)) {
+      return NextResponse.json({ error: 'Database is temporarily unavailable. Please try again later.' }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
