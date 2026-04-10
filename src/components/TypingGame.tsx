@@ -92,17 +92,21 @@ export function TypingGame({ duration }: TypingGameProps) {
     setGameState('finished');
   }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples]);
 
-  const resetGame = useCallback((newPassage?: boolean) => {
+  const resetGame = useCallback((options?: { newPassage?: boolean; newDuration?: number }) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    if (newPassage) {
+    const duration = options?.newDuration ?? currentDuration;
+    if (options?.newDuration !== undefined) {
+      setCurrentDuration(duration);
+    }
+    if (options?.newPassage || options?.newDuration !== undefined) {
       setCurrentPassage(getRandomPassage(currentPassage));
     }
     setTyped('');
     setGameState('waiting');
-    setTimeLeft(currentDuration);
+    setTimeLeft(duration);
     setStartTime(null);
     setResult(null);
     setCompletedPassages([]);
@@ -168,31 +172,19 @@ export function TypingGame({ duration }: TypingGameProps) {
   // Handle duration change from URL
   useEffect(() => {
     if (duration !== currentDuration) {
-      setCurrentDuration(duration);
-      if (timerRef.current) clearInterval(timerRef.current);
-      setTyped('');
-      setGameState('waiting');
-      setTimeLeft(duration);
-      setStartTime(null);
-      setResult(null);
-      setCurrentPassage(getRandomPassage());
-      setCompletedPassages([]);
-      setWpmSamples([]);
-      accumulatedCorrectRef.current = 0;
-      accumulatedIncorrectRef.current = 0;
-      accumulatedTotalRef.current = 0;
+      resetGame({ newDuration: duration });
     }
-  }, [duration, currentDuration]);
+  }, [duration, currentDuration, resetGame]);
 
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Tab') {
         e.preventDefault();
-        resetGame(false);
+        resetGame();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        resetGame(true);
+        resetGame({ newPassage: true });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -288,8 +280,8 @@ export function TypingGame({ duration }: TypingGameProps) {
     return (
       <ResultsScreen
         result={result}
-        onRetry={() => resetGame(false)}
-        onNewTest={() => resetGame(true)}
+        onRetry={() => resetGame()}
+        onNewTest={() => resetGame({ newPassage: true })}
       />
     );
   }
@@ -318,21 +310,7 @@ export function TypingGame({ duration }: TypingGameProps) {
           {[15, 30, 60, 120].map((d) => (
             <button
               key={d}
-              onClick={() => {
-                setCurrentDuration(d);
-                if (timerRef.current) clearInterval(timerRef.current);
-                setTyped('');
-                setGameState('waiting');
-                setTimeLeft(d);
-                setStartTime(null);
-                setResult(null);
-                setCurrentPassage(getRandomPassage());
-                setCompletedPassages([]);
-                setWpmSamples([]);
-                accumulatedCorrectRef.current = 0;
-                accumulatedIncorrectRef.current = 0;
-                accumulatedTotalRef.current = 0;
-              }}
+              onClick={() => resetGame({ newDuration: d })}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 currentDuration === d
                   ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'

@@ -207,6 +207,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   const [saving, setSaving] = useState(() => isNameSet);
   const [saveError, setSaveError] = useState('');
   const saveAttemptedRef = useRef(false);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared' | 'error'>('idle');
 
   const saveScore = useCallback(async () => {
     if (saveAttemptedRef.current || saved) return;
@@ -270,6 +271,44 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     } else {
       saveScore();
     }
+  };
+
+  const handleShare = async () => {
+    const shareText = `I just typed ${result.wpm} WPM with ${result.accuracy}% accuracy on a ${result.duration}s test on TypeRacer Pro! \uD83C\uDFAF`;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ text: shareText });
+        setShareStatus('shared');
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareText);
+        setShareStatus('copied');
+      } else {
+        // Fallback: create a temporary textarea
+        const textarea = document.createElement('textarea');
+        textarea.value = shareText;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        setShareStatus('copied');
+      }
+    } catch {
+      // If share was cancelled or failed, try clipboard
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(shareText);
+          setShareStatus('copied');
+        }
+      } catch {
+        setShareStatus('error');
+      }
+    }
+
+    // Reset status after 2 seconds
+    setTimeout(() => setShareStatus('idle'), 2000);
   };
 
   return (
@@ -342,7 +381,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
       )}
 
       {/* Action Buttons */}
-      <div className="flex justify-center gap-4">
+      <div className="flex justify-center gap-4 flex-wrap">
         <button
           onClick={onRetry}
           className="px-6 py-2.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors font-medium"
@@ -356,6 +395,12 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         >
           New Test
           <span className="text-xs text-gray-500 ml-2">(Esc)</span>
+        </button>
+        <button
+          onClick={handleShare}
+          className="px-6 py-2.5 bg-neon-purple/20 text-neon-purple border border-neon-purple/30 rounded-lg hover:bg-neon-purple/30 transition-colors font-medium"
+        >
+          {shareStatus === 'copied' ? 'Copied!' : shareStatus === 'shared' ? 'Shared!' : shareStatus === 'error' ? 'Failed' : 'Share Results'}
         </button>
       </div>
 
