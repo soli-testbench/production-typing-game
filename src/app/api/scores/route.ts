@@ -90,7 +90,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Cross-validate WPM against character counts and duration
-    if (correctChars > 0 && !isWordMode) {
+    // Skip validation for very short durations (under 3 seconds) where rounding causes large deviations
+    if (correctChars > 0 && durationSeconds >= 3) {
       const expectedWpm = (correctChars / 5) / (durationSeconds / 60);
       const wpmDeviation = Math.abs(wpm - expectedWpm) / expectedWpm;
       if (wpmDeviation > 0.15) {
