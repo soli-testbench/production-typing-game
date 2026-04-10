@@ -6,12 +6,12 @@ import { usePlayer } from '@/components/PlayerProvider';
 interface LeaderboardEntry {
   id: number;
   username: string;
-  anonymous_id: string;
   wpm: number;
   raw_wpm: number;
   accuracy: string;
   duration_seconds: number;
   created_at: string;
+  is_current_user: boolean;
 }
 
 const durations = [
@@ -33,9 +33,10 @@ export default function LeaderboardPage() {
     setLoading(true);
     setError('');
     try {
-      const url = duration
-        ? `/api/leaderboard?duration=${duration}`
-        : '/api/leaderboard';
+      const params = new URLSearchParams();
+      if (duration) params.set('duration', duration);
+      if (anonymousId) params.set('anonymousId', anonymousId);
+      const url = `/api/leaderboard${params.toString() ? `?${params.toString()}` : ''}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch leaderboard');
       const data = await res.json();
@@ -45,7 +46,7 @@ export default function LeaderboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [anonymousId]);
 
   useEffect(() => {
     fetchLeaderboard(selectedDuration);
@@ -129,7 +130,7 @@ export default function LeaderboardPage() {
             </thead>
             <tbody>
               {entries.map((entry, index) => {
-                const isCurrentPlayer = entry.anonymous_id === anonymousId;
+                const isCurrentPlayer = entry.is_current_user;
                 const rank = index + 1;
                 const rankIcon = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : null;
 
