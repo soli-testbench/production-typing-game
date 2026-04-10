@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 
     if (durationParam && [15, 30, 60, 120].includes(Number(durationParam))) {
       sql = `
-        SELECT gr.id, p.username, p.anonymous_id, gr.wpm, gr.raw_wpm, gr.accuracy,
+        SELECT gr.id, p.username, gr.wpm, gr.raw_wpm, gr.accuracy,
                gr.duration_seconds, gr.correct_chars, gr.incorrect_chars, gr.created_at
         FROM game_results gr
         JOIN players p ON gr.player_id = p.id
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       params = [Number(durationParam)];
     } else {
       sql = `
-        SELECT gr.id, p.username, p.anonymous_id, gr.wpm, gr.raw_wpm, gr.accuracy,
+        SELECT gr.id, p.username, gr.wpm, gr.raw_wpm, gr.accuracy,
                gr.duration_seconds, gr.correct_chars, gr.incorrect_chars, gr.created_at
         FROM game_results gr
         JOIN players p ON gr.player_id = p.id
