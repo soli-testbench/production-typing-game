@@ -9,9 +9,9 @@ function getPool(): Pool {
     }
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: true } : true,
-      max: 10,
-      idleTimeoutMillis: 30000,
+      ssl: { rejectUnauthorized: false },
+      max: 5,
+      idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 5000,
     });
   }

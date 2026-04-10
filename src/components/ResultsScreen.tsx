@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
 import { NameEntryModal } from '@/components/NameEntryModal';
 
@@ -13,6 +13,7 @@ interface GameResult {
   incorrectChars: number;
   totalChars: number;
   passage: string;
+  wpmSamples: number[];
 }
 
 interface ResultsScreenProps {
@@ -21,15 +22,195 @@ interface ResultsScreenProps {
   onNewTest: () => void;
 }
 
+function WpmChart({ samples, averageWpm }: { samples: number[]; averageWpm: number }) {
+  if (samples.length < 2) {
+    return (
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8 text-center">
+        <p className="text-gray-500 text-sm">Test too short for WPM chart</p>
+      </div>
+    );
+  }
+
+  const padding = { top: 20, right: 20, bottom: 35, left: 45 };
+  const viewBoxWidth = 600;
+  const viewBoxHeight = 250;
+  const chartWidth = viewBoxWidth - padding.left - padding.right;
+  const chartHeight = viewBoxHeight - padding.top - padding.bottom;
+
+  const maxWpm = Math.max(...samples, averageWpm, 10);
+  const minWpm = 0;
+  const yRange = maxWpm - minWpm || 1;
+
+  const xStep = chartWidth / (samples.length - 1);
+
+  const points = samples.map((wpm, i) => ({
+    x: padding.left + i * xStep,
+    y: padding.top + chartHeight - ((wpm - minWpm) / yRange) * chartHeight,
+  }));
+
+  const pathD = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
+    .join(' ');
+
+  const avgY = padding.top + chartHeight - ((averageWpm - minWpm) / yRange) * chartHeight;
+
+  // Y-axis tick marks
+  const yTickCount = 5;
+  const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => {
+    const val = Math.round(minWpm + (yRange * i) / yTickCount);
+    const y = padding.top + chartHeight - (((val - minWpm) / yRange) * chartHeight);
+    return { val, y };
+  });
+
+  // X-axis tick marks
+  const xTickInterval = Math.max(1, Math.ceil(samples.length / 10));
+  const xTicks = samples
+    .map((_, i) => ({ sec: i + 1, x: padding.left + i * xStep }))
+    .filter((_, i) => (i + 1) % xTickInterval === 0 || i === 0 || i === samples.length - 1);
+
+  return (
+    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
+      <h3 className="text-sm text-gray-400 mb-3 text-center uppercase tracking-wider">WPM Over Time</h3>
+      <svg
+        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+        className="w-full"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {/* Grid lines */}
+        {yTicks.map((tick) => (
+          <line
+            key={`grid-${tick.val}`}
+            x1={padding.left}
+            y1={tick.y}
+            x2={viewBoxWidth - padding.right}
+            y2={tick.y}
+            stroke="#1f2937"
+            strokeWidth="1"
+          />
+        ))}
+
+        {/* Average WPM reference line */}
+        <line
+          x1={padding.left}
+          y1={avgY}
+          x2={viewBoxWidth - padding.right}
+          y2={avgY}
+          stroke="#bf00ff"
+          strokeWidth="1"
+          strokeDasharray="6 4"
+          opacity="0.6"
+        />
+        <text
+          x={viewBoxWidth - padding.right + 2}
+          y={avgY - 4}
+          fill="#bf00ff"
+          fontSize="9"
+          opacity="0.8"
+        >
+          avg
+        </text>
+
+        {/* Area fill under the line */}
+        <path
+          d={`${pathD} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`}
+          fill="url(#wpmGradient)"
+          opacity="0.15"
+        />
+
+        {/* WPM line */}
+        <path
+          d={pathD}
+          fill="none"
+          stroke="#00f0ff"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+
+        {/* Data points */}
+        {points.map((p, i) => (
+          <circle
+            key={`dot-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r="2.5"
+            fill="#00f0ff"
+            opacity="0.7"
+          />
+        ))}
+
+        {/* Y-axis labels */}
+        {yTicks.map((tick) => (
+          <text
+            key={`ylabel-${tick.val}`}
+            x={padding.left - 8}
+            y={tick.y + 3}
+            fill="#6b7280"
+            fontSize="10"
+            textAnchor="end"
+          >
+            {tick.val}
+          </text>
+        ))}
+
+        {/* X-axis labels */}
+        {xTicks.map((tick) => (
+          <text
+            key={`xlabel-${tick.sec}`}
+            x={tick.x}
+            y={viewBoxHeight - 5}
+            fill="#6b7280"
+            fontSize="10"
+            textAnchor="middle"
+          >
+            {tick.sec}s
+          </text>
+        ))}
+
+        {/* Axis labels */}
+        <text
+          x={viewBoxWidth / 2}
+          y={viewBoxHeight}
+          fill="#4b5563"
+          fontSize="10"
+          textAnchor="middle"
+        >
+          Time (seconds)
+        </text>
+        <text
+          x={8}
+          y={viewBoxHeight / 2}
+          fill="#4b5563"
+          fontSize="10"
+          textAnchor="middle"
+          transform={`rotate(-90, 8, ${viewBoxHeight / 2})`}
+        >
+          WPM
+        </text>
+
+        {/* Gradient definition */}
+        <defs>
+          <linearGradient id="wpmGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#00f0ff" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#00f0ff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  );
+}
+
 export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps) {
   const { playerName, anonymousId, isNameSet } = usePlayer();
   const [showNameModal, setShowNameModal] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(() => isNameSet);
   const [saveError, setSaveError] = useState('');
+  const saveAttemptedRef = useRef(false);
 
-  const saveScore = async () => {
-    if (saving || saved) return;
+  const saveScore = useCallback(async () => {
+    if (saveAttemptedRef.current || saved) return;
+    saveAttemptedRef.current = true;
     setSaving(true);
     setSaveError('');
     try {
@@ -55,18 +236,18 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
       setSaved(true);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save score');
+      saveAttemptedRef.current = false;
     } finally {
       setSaving(false);
     }
-  };
+  }, [playerName, anonymousId, result, saved]);
 
   // Auto-save when name is set
   useEffect(() => {
-    if (isNameSet && !saved && !saving) {
+    if (isNameSet && !saved && !saveAttemptedRef.current) {
       saveScore();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNameSet]);
+  }, [isNameSet, saved, saveScore]);
 
   // Keyboard shortcuts for results screen
   useEffect(() => {
@@ -117,6 +298,9 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
           <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Duration</div>
         </div>
       </div>
+
+      {/* WPM Over Time Chart */}
+      <WpmChart samples={result.wpmSamples} averageWpm={result.wpm} />
 
       {/* Character Stats */}
       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">

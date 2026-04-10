@@ -10,7 +10,9 @@ async function migrate() {
 
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: true } : true,
+    ssl: { rejectUnauthorized: false },
+    max: 5,
+    idleTimeoutMillis: 10000,
   });
 
   const migrationSQL = `
