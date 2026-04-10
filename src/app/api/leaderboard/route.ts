@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, ensureMigrations, isConnectionError, sanitizeErrorMessage } from '@/lib/db';
 import { checkRateLimit } from '@/lib/rate-limit';
-
-function getClientIp(request: NextRequest): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    return forwarded.split(',')[0].trim();
-  }
-  return request.headers.get('x-real-ip') || '127.0.0.1';
-}
+import { getClientIp } from '@/lib/request-utils';
 
 export async function GET(request: NextRequest) {
   try {

@@ -254,7 +254,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   const { playerName, anonymousId, isNameSet } = usePlayer();
   const [showNameModal, setShowNameModal] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(() => isNameSet);
+  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const saveAttemptedRef = useRef(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared' | 'error'>('idle');

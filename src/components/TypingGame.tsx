@@ -41,12 +41,20 @@ function generateWordPassage(count: number): string {
   const allWords: string[] = [];
   for (const p of passages) {
     for (const w of p.split(/\s+/)) {
-      if (w.length > 0) allWords.push(w);
+      // Strip leading/trailing punctuation and lowercase
+      const cleaned = w.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').toLowerCase();
+      // Filter out empty strings and single-character artifacts
+      if (cleaned.length > 1) allWords.push(cleaned);
     }
   }
   const selected: string[] = [];
   for (let i = 0; i < count; i++) {
-    selected.push(allWords[Math.floor(Math.random() * allWords.length)]);
+    let word: string;
+    // Prevent consecutive duplicate words
+    do {
+      word = allWords[Math.floor(Math.random() * allWords.length)];
+    } while (selected.length > 0 && word === selected[selected.length - 1]);
+    selected.push(word);
   }
   return selected.join(' ');
 }
