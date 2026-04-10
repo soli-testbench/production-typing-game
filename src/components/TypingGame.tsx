@@ -399,8 +399,38 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
           </div>
         )}
         {isWordMode && (
-          <div className="text-center">
-            <div className="text-lg font-medium text-gray-400">{currentWordCount} words</div>
+          <div className="flex items-center gap-2">
+            {[10, 25, 50, 100].map((wc) => (
+              <button
+                key={wc}
+                onClick={() => {
+                  setCurrentWordCount(wc);
+                  setCurrentPassage(generateWordPassage(wc));
+                  setTyped('');
+                  setGameState('waiting');
+                  setElapsedTime(0);
+                  setStartTime(null);
+                  setResult(null);
+                  setCompletedPassages([]);
+                  setWpmSamples([]);
+                  accumulatedCorrectRef.current = 0;
+                  accumulatedIncorrectRef.current = 0;
+                  accumulatedTotalRef.current = 0;
+                  if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                  }
+                  setTimeout(() => inputRef.current?.focus(), 50);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  currentWordCount === wc
+                    ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'
+                    : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
+                }`}
+              >
+                {wc}w
+              </button>
+            ))}
           </div>
         )}
       </div>

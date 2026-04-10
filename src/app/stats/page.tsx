@@ -16,11 +16,89 @@ interface ScoreEntry {
   username: string;
 }
 
-function WpmTrendChart({ samples }: { samples: number[] }) {
-  if (samples.length < 2) {
+interface TrendMode {
+  key: string;
+  label: string;
+}
+
+function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
+  // Determine available modes and their game counts
+  const modeCounts: Record<string, number> = {};
+  for (const s of scores) {
+    const mode = s.game_mode && s.game_mode.startsWith('words-') ? s.game_mode : `${s.duration_seconds}s`;
+    modeCounts[mode] = (modeCounts[mode] || 0) + 1;
+  }
+
+  const allModes: TrendMode[] = [
+    { key: '15s', label: '15s' },
+    { key: '30s', label: '30s' },
+    { key: '60s', label: '60s' },
+    { key: '120s', label: '120s' },
+    { key: 'words-10', label: '10w' },
+    { key: 'words-25', label: '25w' },
+    { key: 'words-50', label: '50w' },
+    { key: 'words-100', label: '100w' },
+  ];
+
+  const availableModes = allModes.filter((m) => (modeCounts[m.key] || 0) > 0);
+
+  // Default to mode with most games
+  const defaultMode = availableModes.length > 0
+    ? availableModes.reduce((a, b) => (modeCounts[a.key] || 0) >= (modeCounts[b.key] || 0) ? a : b)
+    : null;
+
+  const [selectedMode, setSelectedMode] = useState<string>(defaultMode?.key || '');
+
+  // Update default when scores change
+  useEffect(() => {
+    if (!selectedMode && defaultMode) {
+      setSelectedMode(defaultMode.key);
+    }
+  }, [defaultMode, selectedMode]);
+
+  // Filter scores by selected mode
+  const filteredScores = scores.filter((s) => {
+    if (!selectedMode) return false;
+    if (selectedMode.startsWith('words-')) {
+      return s.game_mode === selectedMode;
+    }
+    const dur = parseInt(selectedMode);
+    return s.duration_seconds === dur && (!s.game_mode || s.game_mode === 'classic');
+  });
+
+  const chronological = [...filteredScores].reverse();
+  const trendGames = chronological.slice(-Math.max(20, chronological.length));
+  const samples = trendGames.map((s) => s.wpm);
+
+  const selectedLabel = allModes.find((m) => m.key === selectedMode)?.label || selectedMode;
+
+  if (availableModes.length === 0) {
     return (
       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8 text-center">
         <p className="text-gray-500 text-sm">Need at least 2 games for a trend chart</p>
+      </div>
+    );
+  }
+
+  if (samples.length < 2) {
+    return (
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
+          {availableModes.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setSelectedMode(m.key)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                selectedMode === m.key
+                  ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-gray-500 text-sm text-center">Need at least 2 games in {selectedLabel} mode for a trend chart</p>
       </div>
     );
   }
@@ -63,7 +141,22 @@ function WpmTrendChart({ samples }: { samples: number[] }) {
 
   return (
     <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
-      <h3 className="text-sm text-gray-400 mb-3 text-center uppercase tracking-wider">Average WPM Trend (Recent Games)</h3>
+      <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
+          {availableModes.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setSelectedMode(m.key)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                selectedMode === m.key
+                  ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      <h3 className="text-sm text-gray-400 mb-3 text-center uppercase tracking-wider">WPM Trend - {selectedLabel}</h3>
       <svg
         viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
         className="w-full"
@@ -257,10 +350,6 @@ export default function StatsPage() {
     ? (scores.reduce((sum, s) => sum + Number(s.accuracy), 0) / totalGames).toFixed(1)
     : '0.0';
 
-  // WPM trend: chronological order (oldest to newest), last 20+ games
-  const chronological = [...scores].reverse();
-  const trendGames = chronological.slice(-Math.max(20, chronological.length));
-  const trendWpms = trendGames.map((s) => s.wpm);
 
   return (
     <div className="max-w-4xl mx-auto animate-fade-in">
@@ -359,7 +448,7 @@ export default function StatsPage() {
           </div>
 
           {/* WPM Trend Chart */}
-          <WpmTrendChart samples={trendWpms} />
+          <WpmTrendChart scores={scores} />
 
           {/* Recent Games Table */}
           <h2 className="text-lg font-semibold text-gray-300 mb-4">Recent Games</h2>
