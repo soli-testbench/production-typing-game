@@ -3,27 +3,13 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
 import { NameEntryModal } from '@/components/NameEntryModal';
+import { GameResult } from '@/types/game';
 
 interface PersonalBestInfo {
   isNewBest: boolean;
   isFirstScore: boolean;
   isTied: boolean;
   improvement: number;
-}
-
-interface GameResult {
-  wpm: number;
-  rawWpm: number;
-  accuracy: number;
-  duration: number;
-  correctChars: number;
-  incorrectChars: number;
-  totalChars: number;
-  passage: string;
-  wpmSamples: number[];
-  gameMode: 'time' | 'words';
-  wordCount?: number;
-  completionTime?: number;
 }
 
 interface ResultsScreenProps {
@@ -372,12 +358,13 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     }
   }, [playerName, anonymousId, result, saved, maxRetries]);
 
-  // Auto-save when name is set
+  // Auto-save when name is already set on mount
   useEffect(() => {
     if (isNameSet && !saved && !saveAttemptedRef.current) {
       saveScore();
     }
-  }, [isNameSet, saved, saveScore]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keyboard shortcuts for results screen
   useEffect(() => {
@@ -508,7 +495,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
             disabled={saving || retrying}
             className="px-6 py-2.5 bg-neon-blue/20 text-neon-blue border border-neon-blue/30 rounded-lg hover:bg-neon-blue/30 transition-colors disabled:opacity-50 font-medium"
           >
-            {retrying ? `Retrying... (${retryCount}/${maxRetries})` : saving ? 'Saving...' : 'Save Score to Leaderboard'}
+            {retrying ? `Retrying... (${retryCount}/${maxRetries})` : saving ? 'Saving...' : isNameSet ? 'Save Score to Leaderboard' : 'Set Name & Save Score'}
           </button>
           {saveError && <p className="text-red-400 text-sm mt-2">{saveError}</p>}
         </div>
@@ -547,7 +534,8 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         <NameEntryModal
           onClose={() => setShowNameModal(false)}
           onSaved={() => {
-            // After name is saved, auto-save will trigger via useEffect
+            setShowNameModal(false);
+            saveScore();
           }}
         />
       )}

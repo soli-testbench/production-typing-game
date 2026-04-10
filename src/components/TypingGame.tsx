@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { passages } from '@/data/passages';
 import { ResultsScreen } from '@/components/ResultsScreen';
+import { GameResult } from '@/types/game';
+
+export type { GameResult } from '@/types/game';
 
 interface TypingGameProps {
   mode?: 'time' | 'words';
@@ -11,21 +14,6 @@ interface TypingGameProps {
 }
 
 type GameState = 'waiting' | 'running' | 'finished';
-
-export interface GameResult {
-  wpm: number;
-  rawWpm: number;
-  accuracy: number;
-  duration: number;
-  correctChars: number;
-  incorrectChars: number;
-  totalChars: number;
-  passage: string;
-  wpmSamples: number[];
-  gameMode: 'time' | 'words';
-  wordCount?: number;
-  completionTime?: number;
-}
 
 interface PassageRecord {
   text: string;
@@ -129,7 +117,7 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
     setGameState('finished');
   }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples, startTime, isWordMode, currentWordCount]);
 
-  const resetGame = useCallback((options?: { newPassage?: boolean; newDuration?: number }) => {
+  const resetGame = useCallback((options?: { newPassage?: boolean; newDuration?: number; newWordCount?: number }) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -138,8 +126,12 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
     if (options?.newDuration !== undefined) {
       setCurrentDuration(dur);
     }
+    const wc = options?.newWordCount ?? currentWordCount;
+    if (options?.newWordCount !== undefined) {
+      setCurrentWordCount(wc);
+    }
     if (isWordMode) {
-      setCurrentPassage(generateWordPassage(currentWordCount || 25));
+      setCurrentPassage(generateWordPassage(wc || 25));
     } else if (options?.newPassage || options?.newDuration !== undefined) {
       setCurrentPassage(getRandomPassage(currentPassage));
     }
@@ -403,25 +395,7 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
             {[10, 25, 50, 100].map((wc) => (
               <button
                 key={wc}
-                onClick={() => {
-                  setCurrentWordCount(wc);
-                  setCurrentPassage(generateWordPassage(wc));
-                  setTyped('');
-                  setGameState('waiting');
-                  setElapsedTime(0);
-                  setStartTime(null);
-                  setResult(null);
-                  setCompletedPassages([]);
-                  setWpmSamples([]);
-                  accumulatedCorrectRef.current = 0;
-                  accumulatedIncorrectRef.current = 0;
-                  accumulatedTotalRef.current = 0;
-                  if (timerRef.current) {
-                    clearInterval(timerRef.current);
-                    timerRef.current = null;
-                  }
-                  setTimeout(() => inputRef.current?.focus(), 50);
-                }}
+                onClick={() => resetGame({ newWordCount: wc })}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   currentWordCount === wc
                     ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'
