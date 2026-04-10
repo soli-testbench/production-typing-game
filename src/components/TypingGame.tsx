@@ -10,7 +10,7 @@ interface TypingGameProps {
 
 type GameState = 'waiting' | 'running' | 'finished';
 
-interface GameResult {
+export interface GameResult {
   wpm: number;
   rawWpm: number;
   accuracy: number;
@@ -19,6 +19,12 @@ interface GameResult {
   incorrectChars: number;
   totalChars: number;
   passage: string;
+  wpmSamples: number[];
+}
+
+interface PassageRecord {
+  text: string;
+  typed: string;
 }
 
 function getRandomPassage(exclude?: string): string {
@@ -27,48 +33,64 @@ function getRandomPassage(exclude?: string): string {
 }
 
 export function TypingGame({ duration }: TypingGameProps) {
-  const [passage, setPassage] = useState(() => getRandomPassage());
+  const [currentPassage, setCurrentPassage] = useState(() => getRandomPassage());
   const [typed, setTyped] = useState('');
   const [gameState, setGameState] = useState<GameState>('waiting');
   const [timeLeft, setTimeLeft] = useState(duration);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [result, setResult] = useState<GameResult | null>(null);
   const [currentDuration, setCurrentDuration] = useState(duration);
+  const [completedPassages, setCompletedPassages] = useState<PassageRecord[]>([]);
+  const [wpmSamples, setWpmSamples] = useState<number[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentCharRef = useRef<HTMLSpanElement>(null);
+  const textDisplayRef = useRef<HTMLDivElement>(null);
 
-  const calculateStats = useCallback(() => {
-    let correct = 0;
-    let incorrect = 0;
+  // Refs for accumulated stats across passages
+  const accumulatedCorrectRef = useRef(0);
+  const accumulatedIncorrectRef = useRef(0);
+  const accumulatedTotalRef = useRef(0);
+
+  const calculateAggregateStats = useCallback(() => {
+    let currentCorrect = 0;
+    let currentIncorrect = 0;
     for (let i = 0; i < typed.length; i++) {
-      if (typed[i] === passage[i]) {
-        correct++;
+      if (typed[i] === currentPassage[i]) {
+        currentCorrect++;
       } else {
-        incorrect++;
+        currentIncorrect++;
       }
     }
-    const totalChars = typed.length;
+    const totalCorrect = accumulatedCorrectRef.current + currentCorrect;
+    const totalIncorrect = accumulatedIncorrectRef.current + currentIncorrect;
+    const totalChars = accumulatedTotalRef.current + typed.length;
     const elapsedMinutes = currentDuration / 60;
-    const wpm = Math.round(correct / 5 / elapsedMinutes);
+    const wpm = Math.round(totalCorrect / 5 / elapsedMinutes);
     const rawWpm = Math.round(totalChars / 5 / elapsedMinutes);
-    const accuracy = totalChars > 0 ? Math.round((correct / totalChars) * 100) : 0;
+    const accuracy = totalChars > 0 ? Math.round((totalCorrect / totalChars) * 100) : 0;
 
-    return { wpm, rawWpm, accuracy, correctChars: correct, incorrectChars: incorrect, totalChars };
-  }, [typed, passage, currentDuration]);
+    return { wpm, rawWpm, accuracy, correctChars: totalCorrect, incorrectChars: totalIncorrect, totalChars };
+  }, [typed, currentPassage, currentDuration]);
 
   const finishGame = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    const stats = calculateStats();
+    const stats = calculateAggregateStats();
+    const allPassageText = [
+      ...completedPassages.map((p) => p.text),
+      currentPassage,
+    ].join(' | ');
     setResult({
       ...stats,
       duration: currentDuration,
-      passage,
+      passage: allPassageText,
+      wpmSamples,
     });
     setGameState('finished');
-  }, [calculateStats, currentDuration, passage]);
+  }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples]);
 
   const resetGame = useCallback((newPassage?: boolean) => {
     if (timerRef.current) {
@@ -76,15 +98,20 @@ export function TypingGame({ duration }: TypingGameProps) {
       timerRef.current = null;
     }
     if (newPassage) {
-      setPassage(getRandomPassage(passage));
+      setCurrentPassage(getRandomPassage(currentPassage));
     }
     setTyped('');
     setGameState('waiting');
     setTimeLeft(currentDuration);
     setStartTime(null);
     setResult(null);
+    setCompletedPassages([]);
+    setWpmSamples([]);
+    accumulatedCorrectRef.current = 0;
+    accumulatedIncorrectRef.current = 0;
+    accumulatedTotalRef.current = 0;
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [currentDuration, passage]);
+  }, [currentDuration, currentPassage]);
 
   const startGame = useCallback(() => {
     setGameState('running');
@@ -100,6 +127,29 @@ export function TypingGame({ duration }: TypingGameProps) {
       });
     }, 1000);
   }, [currentDuration]);
+
+  // Sample WPM every second when game is running
+  useEffect(() => {
+    if (gameState !== 'running' || !startTime) return;
+
+    const sampleInterval = setInterval(() => {
+      const elapsedMs = Date.now() - startTime;
+      const elapsedMinutes = elapsedMs / 1000 / 60;
+      if (elapsedMinutes < 0.01) return;
+
+      let currentCorrect = 0;
+      const typedVal = inputRef.current?.value || '';
+      for (let i = 0; i < typedVal.length; i++) {
+        if (typedVal[i] === currentPassage[i]) currentCorrect++;
+      }
+
+      const totalCorrect = accumulatedCorrectRef.current + currentCorrect;
+      const currentWpm = Math.round(totalCorrect / 5 / elapsedMinutes);
+      setWpmSamples((prev) => [...prev, currentWpm]);
+    }, 1000);
+
+    return () => clearInterval(sampleInterval);
+  }, [gameState, startTime, currentPassage]);
 
   // Handle timer reaching 0
   useEffect(() => {
@@ -125,7 +175,12 @@ export function TypingGame({ duration }: TypingGameProps) {
       setTimeLeft(duration);
       setStartTime(null);
       setResult(null);
-      setPassage(getRandomPassage());
+      setCurrentPassage(getRandomPassage());
+      setCompletedPassages([]);
+      setWpmSamples([]);
+      accumulatedCorrectRef.current = 0;
+      accumulatedIncorrectRef.current = 0;
+      accumulatedTotalRef.current = 0;
     }
   }, [duration, currentDuration]);
 
@@ -149,6 +204,13 @@ export function TypingGame({ duration }: TypingGameProps) {
     inputRef.current?.focus();
   }, [gameState]);
 
+  // Auto-scroll to current typing position
+  useEffect(() => {
+    if (currentCharRef.current) {
+      currentCharRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [typed]);
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (gameState === 'finished') return;
 
@@ -158,36 +220,68 @@ export function TypingGame({ duration }: TypingGameProps) {
       startGame();
     }
 
-    // Don't allow typing beyond passage length
-    if (value.length <= passage.length) {
+    // Don't allow typing beyond current passage length
+    if (value.length <= currentPassage.length) {
       setTyped(value);
     }
 
-    // Finish if typed all characters
-    if (value.length >= passage.length) {
-      finishGame();
+    // If typed all characters of current passage, chain to next passage
+    if (value.length >= currentPassage.length) {
+      // Calculate stats for completed passage
+      let correct = 0;
+      let incorrect = 0;
+      for (let i = 0; i < currentPassage.length; i++) {
+        if (value[i] === currentPassage[i]) {
+          correct++;
+        } else {
+          incorrect++;
+        }
+      }
+
+      // Accumulate stats
+      accumulatedCorrectRef.current += correct;
+      accumulatedIncorrectRef.current += incorrect;
+      accumulatedTotalRef.current += currentPassage.length;
+
+      // Record completed passage
+      const completedTyped = value.slice(0, currentPassage.length);
+      const completedText = currentPassage;
+      setCompletedPassages((prev) => [...prev, { text: completedText, typed: completedTyped }]);
+
+      // Load next passage
+      const nextPassage = getRandomPassage(currentPassage);
+      setCurrentPassage(nextPassage);
+      setTyped('');
+
+      // Reset the textarea value directly
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
     }
   };
 
-  // Calculate live WPM
+  // Calculate live WPM (aggregate across passages)
   const liveWpm = (() => {
     if (!startTime || gameState !== 'running') return 0;
     const elapsed = (Date.now() - startTime) / 1000 / 60;
     if (elapsed < 0.01) return 0;
     let correct = 0;
     for (let i = 0; i < typed.length; i++) {
-      if (typed[i] === passage[i]) correct++;
+      if (typed[i] === currentPassage[i]) correct++;
     }
-    return Math.round(correct / 5 / elapsed);
+    const totalCorrect = accumulatedCorrectRef.current + correct;
+    return Math.round(totalCorrect / 5 / elapsed);
   })();
 
   const liveAccuracy = (() => {
-    if (typed.length === 0) return 100;
+    const totalTyped = accumulatedTotalRef.current + typed.length;
+    if (totalTyped === 0) return 100;
     let correct = 0;
     for (let i = 0; i < typed.length; i++) {
-      if (typed[i] === passage[i]) correct++;
+      if (typed[i] === currentPassage[i]) correct++;
     }
-    return Math.round((correct / typed.length) * 100);
+    const totalCorrect = accumulatedCorrectRef.current + correct;
+    return Math.round((totalCorrect / totalTyped) * 100);
   })();
 
   if (result && gameState === 'finished') {
@@ -232,7 +326,12 @@ export function TypingGame({ duration }: TypingGameProps) {
                 setTimeLeft(d);
                 setStartTime(null);
                 setResult(null);
-                setPassage(getRandomPassage());
+                setCurrentPassage(getRandomPassage());
+                setCompletedPassages([]);
+                setWpmSamples([]);
+                accumulatedCorrectRef.current = 0;
+                accumulatedIncorrectRef.current = 0;
+                accumulatedTotalRef.current = 0;
               }}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 currentDuration === d
@@ -248,10 +347,11 @@ export function TypingGame({ duration }: TypingGameProps) {
 
       {/* Typing Area */}
       <div
-        className="relative bg-gray-900/50 border border-gray-800 rounded-xl p-6 md:p-8 cursor-text min-h-48"
+        className="relative bg-gray-900/50 border border-gray-800 rounded-xl p-6 md:p-8 cursor-text max-h-64 overflow-y-auto"
         onClick={() => inputRef.current?.focus()}
+        ref={textDisplayRef}
       >
-        {gameState === 'waiting' && typed.length === 0 && (
+        {gameState === 'waiting' && typed.length === 0 && completedPassages.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
             <p className="text-gray-500 text-lg">Click here or start typing to begin...</p>
           </div>
@@ -259,17 +359,41 @@ export function TypingGame({ duration }: TypingGameProps) {
 
         {/* Text Display */}
         <div className="text-lg md:text-xl leading-relaxed tracking-wide select-none" aria-hidden="true">
-          {passage.split('').map((char, index) => {
+          {/* Previously completed passages */}
+          {completedPassages.map((record, pIndex) => (
+            <span key={`passage-${pIndex}`}>
+              {record.text.split('').map((char, index) => {
+                const wasCorrect = record.typed[index] === char;
+                return (
+                  <span
+                    key={`p${pIndex}-${index}`}
+                    className={wasCorrect ? 'text-neon-green/50' : 'text-red-500/50'}
+                  >
+                    {char}
+                  </span>
+                );
+              })}
+              <span className="text-gray-700 mx-2">|</span>
+            </span>
+          ))}
+
+          {/* Current passage */}
+          {currentPassage.split('').map((char, index) => {
             let className = 'text-gray-600';
+            const isCursor = index === typed.length;
             if (index < typed.length) {
               className = typed[index] === char
                 ? 'text-neon-green'
                 : 'text-red-500 bg-red-500/10';
-            } else if (index === typed.length) {
+            } else if (isCursor) {
               className = 'text-gray-300 border-l-2 border-neon-blue cursor-blink';
             }
             return (
-              <span key={index} className={className}>
+              <span
+                key={`current-${index}`}
+                className={className}
+                ref={isCursor ? currentCharRef : undefined}
+              >
                 {char}
               </span>
             );
@@ -290,13 +414,20 @@ export function TypingGame({ duration }: TypingGameProps) {
         />
       </div>
 
-      {/* Progress Bar */}
+      {/* Progress Bar (per-passage) */}
       <div className="mt-4 h-1 bg-gray-800 rounded-full overflow-hidden">
         <div
           className="h-full bg-gradient-to-r from-neon-blue to-neon-purple transition-all duration-100"
-          style={{ width: `${(typed.length / passage.length) * 100}%` }}
+          style={{ width: `${(typed.length / currentPassage.length) * 100}%` }}
         />
       </div>
+
+      {/* Passage indicator */}
+      {completedPassages.length > 0 && (
+        <div className="mt-2 text-xs text-gray-600 text-center">
+          Passage {completedPassages.length + 1}
+        </div>
+      )}
 
       {/* Hints */}
       <div className="mt-6 flex justify-center gap-6 text-xs text-gray-600">
