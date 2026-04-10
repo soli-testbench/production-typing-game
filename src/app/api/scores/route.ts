@@ -2,17 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query, ensureMigrations, isConnectionError, sanitizeErrorMessage } from '@/lib/db';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { checkDurationRateLimit } from '@/lib/duration-rate-limit';
+import { getClientIp } from '@/lib/request-utils';
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20).trim();
-}
-
-function getClientIp(request: NextRequest): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    return forwarded.split(',')[0].trim();
-  }
-  return request.headers.get('x-real-ip') || '127.0.0.1';
 }
 
 export async function POST(request: NextRequest) {
@@ -144,12 +137,13 @@ export async function POST(request: NextRequest) {
     );
     const playerId = playerResult.rows[0].id;
 
-    // Fetch previous best WPM for this duration before inserting the new score
+    // Fetch previous best WPM for this duration and game mode before inserting the new score
+    const effectiveGameMode = gameMode || 'classic';
     const previousBestResult = await query(
       `SELECT MAX(gr.wpm) as best_wpm
        FROM game_results gr
-       WHERE gr.player_id = $1 AND gr.duration_seconds = $2`,
-      [playerId, durationSeconds]
+       WHERE gr.player_id = $1 AND gr.duration_seconds = $2 AND gr.game_mode = $3`,
+      [playerId, durationSeconds, effectiveGameMode]
     );
     const previousBestWpm: number | null = previousBestResult.rows[0]?.best_wpm ?? null;
 
