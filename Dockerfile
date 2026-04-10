@@ -18,6 +18,9 @@ ENV NODE_ENV=production
 
 RUN npm run build
 
+# Ensure public directory exists even if the source has no static assets
+RUN mkdir -p /app/public
+
 # Production image
 FROM base AS runner
 WORKDIR /app
