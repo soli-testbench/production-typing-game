@@ -221,13 +221,27 @@ export default function StatsPage() {
     });
   };
 
-  // Personal bests per duration
+  // Personal bests per duration (timed modes)
   const durations = [15, 30, 60, 120];
   const personalBests = durations.map((d) => {
-    const filtered = scores.filter((s) => s.duration_seconds === d);
+    const filtered = scores.filter((s) => s.duration_seconds === d && (!s.game_mode || s.game_mode === 'classic'));
     if (filtered.length === 0) return { duration: d, wpm: null };
     const best = filtered.reduce((a, b) => (a.wpm > b.wpm ? a : b));
     return { duration: d, wpm: best.wpm };
+  });
+
+  // Personal bests per word count mode
+  const wordModes = [
+    { mode: 'words-10', label: '10w' },
+    { mode: 'words-25', label: '25w' },
+    { mode: 'words-50', label: '50w' },
+    { mode: 'words-100', label: '100w' },
+  ];
+  const wordModeBests = wordModes.map(({ mode, label }) => {
+    const filtered = scores.filter((s) => s.game_mode === mode);
+    if (filtered.length === 0) return { mode, label, wpm: null, completionTime: null };
+    const best = filtered.reduce((a, b) => (a.wpm > b.wpm ? a : b));
+    return { mode, label, wpm: best.wpm, completionTime: best.duration_seconds };
   });
 
   // Total games and total time
@@ -324,6 +338,22 @@ export default function StatsPage() {
                   {pb.wpm !== null ? pb.wpm : '\u2014'}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">WPM</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Word Mode Bests */}
+          <h2 className="text-lg font-semibold text-gray-300 mb-4">Word Mode Bests</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {wordModeBests.map((wb) => (
+              <div key={wb.mode} className="bg-gray-900/80 border border-neon-blue/20 rounded-xl p-4 text-center">
+                <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">{wb.label}</div>
+                <div className="text-3xl font-bold text-neon-blue">
+                  {wb.wpm !== null ? wb.wpm : '\u2014'}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {wb.wpm !== null ? `${wb.completionTime}s · WPM` : 'WPM'}
+                </div>
               </div>
             ))}
           </div>
