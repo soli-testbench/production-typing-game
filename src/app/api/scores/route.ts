@@ -137,6 +137,15 @@ export async function POST(request: NextRequest) {
     );
     const playerId = playerResult.rows[0].id;
 
+    // Fetch previous best WPM for this duration before inserting the new score
+    const previousBestResult = await query(
+      `SELECT MAX(gr.wpm) as best_wpm
+       FROM game_results gr
+       WHERE gr.player_id = $1 AND gr.duration_seconds = $2`,
+      [playerId, durationSeconds]
+    );
+    const previousBestWpm: number | null = previousBestResult.rows[0]?.best_wpm ?? null;
+
     // Insert game result
     const gameResult = await query(
       `INSERT INTO game_results (player_id, game_mode, wpm, raw_wpm, accuracy, duration_seconds, correct_chars, incorrect_chars)
@@ -148,6 +157,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       id: gameResult.rows[0].id,
+      personalBest: {
+        previousBestWpm,
+      },
     }, { status: 201 });
   } catch (error) {
     console.error('Error saving score:', sanitizeErrorMessage(error));
