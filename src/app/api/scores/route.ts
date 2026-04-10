@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, runMigrations } from '@/lib/db';
+import { query, ensureMigrations } from '@/lib/db';
 import { checkRateLimit } from '@/lib/rate-limit';
-
-let migrationsRun = false;
-
-async function ensureMigrations() {
-  if (!migrationsRun) {
-    await runMigrations();
-    migrationsRun = true;
-  }
-}
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20).trim();
