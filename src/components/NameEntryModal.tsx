@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
 
 interface NameEntryModalProps {
@@ -13,10 +13,51 @@ export function NameEntryModal({ onClose, onSaved }: NameEntryModalProps) {
   const [name, setName] = useState(playerName);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Trap focus within the modal and stop propagation to prevent game shortcuts
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const modal = modalRef.current;
+      if (!modal) return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'input, button, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+  }, [onClose]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [handleKeyDown]);
 
   const validate = (value: string): string => {
     if (!value.trim()) return 'Name is required';
@@ -44,9 +85,14 @@ export function NameEntryModal({ onClose, onSaved }: NameEntryModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 animate-slide-up">
-        <h2 className="text-xl font-bold text-gray-100 mb-2">Enter Your Name</h2>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="name-entry-title"
+    >
+      <div ref={modalRef} className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 animate-slide-up">
+        <h2 id="name-entry-title" className="text-xl font-bold text-gray-100 mb-2">Enter Your Name</h2>
         <p className="text-gray-400 text-sm mb-6">
           Choose a display name for the leaderboard.
         </p>

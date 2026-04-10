@@ -40,6 +40,9 @@ export function Navigation() {
               <Link href="/leaderboard" className={linkClass('/leaderboard')}>
                 Leaderboard
               </Link>
+              <Link href="/stats" className={linkClass('/stats')}>
+                Stats
+              </Link>
             </div>
 
             <button
