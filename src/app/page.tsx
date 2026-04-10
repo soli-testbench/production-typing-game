@@ -41,6 +41,45 @@ const gameModes = [
   },
 ];
 
+const wordModes = [
+  {
+    title: '10 Words',
+    description: 'Lightning round. Type 10 words as fast as you can.',
+    wordCount: 10,
+    color: 'text-neon-green',
+    borderColor: 'border-neon-green/30',
+    hoverGlow: 'hover:shadow-[0_0_30px_rgba(57,255,20,0.2)]',
+    icon: '💨',
+  },
+  {
+    title: '25 Words',
+    description: 'Quick challenge. A short burst of words.',
+    wordCount: 25,
+    color: 'text-neon-blue',
+    borderColor: 'border-neon-blue/30',
+    hoverGlow: 'hover:shadow-[0_0_30px_rgba(0,240,255,0.2)]',
+    icon: '✏️',
+  },
+  {
+    title: '50 Words',
+    description: 'Balanced test. Enough words for a solid measurement.',
+    wordCount: 50,
+    color: 'text-neon-purple',
+    borderColor: 'border-neon-purple/30',
+    hoverGlow: 'hover:shadow-[0_0_30px_rgba(191,0,255,0.2)]',
+    icon: '📝',
+  },
+  {
+    title: '100 Words',
+    description: 'Full challenge. Test your endurance and consistency.',
+    wordCount: 100,
+    color: 'text-neon-pink',
+    borderColor: 'border-neon-pink/30',
+    hoverGlow: 'hover:shadow-[0_0_30px_rgba(255,0,110,0.2)]',
+    icon: '📖',
+  },
+];
+
 export default function HomePage() {
   return (
     <div className="flex flex-col items-center animate-fade-in">
@@ -74,6 +113,33 @@ export default function HomePage() {
             <Link
               key={mode.duration}
               href={`/game?duration=${mode.duration}`}
+              className={`card-hover block bg-gray-900/80 border ${mode.borderColor} rounded-xl p-6 text-center group ${mode.hoverGlow} transition-all duration-300`}
+            >
+              <div className="text-4xl mb-3">{mode.icon}</div>
+              <h3 className={`text-xl font-bold ${mode.color} mb-2`}>
+                {mode.title}
+              </h3>
+              <p className="text-gray-400 text-sm leading-relaxed">
+                {mode.description}
+              </p>
+              <div className={`mt-4 text-sm ${mode.color} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}>
+                Start Test →
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {/* Word Count Mode Cards */}
+      <div className="w-full max-w-4xl mt-12">
+        <h2 className="text-2xl font-semibold text-gray-300 mb-6 text-center">
+          Word Count
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+          {wordModes.map((mode) => (
+            <Link
+              key={mode.wordCount}
+              href={`/game?mode=words&wordCount=${mode.wordCount}`}
               className={`card-hover block bg-gray-900/80 border ${mode.borderColor} rounded-xl p-6 text-center group ${mode.hoverGlow} transition-all duration-300`}
             >
               <div className="text-4xl mb-3">{mode.icon}</div>

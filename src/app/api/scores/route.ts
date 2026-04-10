@@ -62,9 +62,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Accuracy must be a number between 0 and 100' }, { status: 400 });
     }
 
-    // Validate duration
-    if (![15, 30, 60, 120].includes(durationSeconds)) {
-      return NextResponse.json({ error: 'Duration must be 15, 30, 60, or 120 seconds' }, { status: 400 });
+    // Validate game mode and duration
+    const validWordModes = ['words-10', 'words-25', 'words-50', 'words-100'];
+    const isWordMode = validWordModes.includes(gameMode);
+    if (!isWordMode && ![15, 30, 60, 120].includes(durationSeconds)) {
+      return NextResponse.json({ error: 'Duration must be 15, 30, 60, or 120 seconds for timed mode' }, { status: 400 });
+    }
+    if (isWordMode && (typeof durationSeconds !== 'number' || durationSeconds < 1 || durationSeconds > 3600)) {
+      return NextResponse.json({ error: 'Duration must be between 1 and 3600 seconds for word mode' }, { status: 400 });
     }
 
     // Validate character counts
@@ -92,7 +97,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Cross-validate WPM against character counts and duration
-    if (correctChars > 0) {
+    if (correctChars > 0 && !isWordMode) {
       const expectedWpm = (correctChars / 5) / (durationSeconds / 60);
       const wpmDeviation = Math.abs(wpm - expectedWpm) / expectedWpm;
       if (wpmDeviation > 0.15) {
@@ -117,12 +122,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Duration-aware rate limiting: prevent submitting faster than test duration allows
-    const durationRateCheck = checkDurationRateLimit(ip, durationSeconds);
-    if (!durationRateCheck.allowed) {
-      return NextResponse.json(
-        { error: `Submission too frequent for a ${durationSeconds}s test. Try again in ${durationRateCheck.retryAfter} seconds.` },
-        { status: 429, headers: { 'Retry-After': String(durationRateCheck.retryAfter) } }
-      );
+    if (!isWordMode) {
+      const durationRateCheck = checkDurationRateLimit(ip, durationSeconds);
+      if (!durationRateCheck.allowed) {
+        return NextResponse.json(
+          { error: `Submission too frequent for a ${durationSeconds}s test. Try again in ${durationRateCheck.retryAfter} seconds.` },
+          { status: 429, headers: { 'Retry-After': String(durationRateCheck.retryAfter) } }
+        );
+      }
     }
 
     await ensureMigrations();
@@ -172,13 +179,21 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const readRateCheck = checkRateLimit(ip, 30);
+    if (!readRateCheck.allowed) {
+      return NextResponse.json(
+        { error: `Rate limit exceeded. Try again in ${readRateCheck.retryAfter} seconds.` },
+        { status: 429, headers: { 'Retry-After': String(readRateCheck.retryAfter) } }
+      );
+    }
+
     await ensureMigrations();
 
-    const { searchParams } = new URL(request.url);
-    const anonymousId = searchParams.get('anonymousId');
+    const anonymousId = request.headers.get('x-anonymous-id');
 
     if (!anonymousId) {
-      return NextResponse.json({ error: 'anonymousId query parameter is required' }, { status: 400 });
+      return NextResponse.json({ error: 'X-Anonymous-Id header is required' }, { status: 400 });
     }
 
     const result = await query(

@@ -195,7 +195,9 @@ export default function StatsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/scores?anonymousId=${encodeURIComponent(anonymousId)}`);
+      const res = await fetch('/api/scores', {
+        headers: { 'X-Anonymous-Id': anonymousId },
+      });
       if (!res.ok) throw new Error('Failed to fetch scores');
       const data = await res.json();
       setScores(data.scores || []);

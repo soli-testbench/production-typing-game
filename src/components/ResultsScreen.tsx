@@ -21,6 +21,9 @@ interface GameResult {
   totalChars: number;
   passage: string;
   wpmSamples: number[];
+  gameMode: 'time' | 'words';
+  wordCount?: number;
+  completionTime?: number;
 }
 
 interface ResultsScreenProps {
@@ -288,7 +291,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         body: JSON.stringify({
           playerName,
           anonymousId,
-          gameMode: 'classic',
+          gameMode: result.gameMode === 'words' ? `words-${result.wordCount}` : 'classic',
           wpm: result.wpm,
           rawWpm: result.rawWpm,
           accuracy: result.accuracy,
@@ -400,7 +403,10 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   };
 
   const handleShare = async () => {
-    const shareText = `I just typed ${result.wpm} WPM with ${result.accuracy}% accuracy on a ${result.duration}s test on TypeRacer Pro! \uD83C\uDFAF`;
+    const modeDesc = result.gameMode === 'words'
+      ? `${result.wordCount}-word test in ${result.completionTime}s`
+      : `${result.duration}s test`;
+    const shareText = `I just typed ${result.wpm} WPM with ${result.accuracy}% accuracy on a ${modeDesc} on TypeRacer Pro! \uD83C\uDFAF`;
 
     try {
       if (typeof navigator !== 'undefined' && navigator.share) {
@@ -462,8 +468,12 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
           <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Accuracy</div>
         </div>
         <div className="bg-gray-900/80 border border-neon-yellow/20 rounded-xl p-4 text-center">
-          <div className="text-4xl font-bold text-neon-yellow">{result.duration}s</div>
-          <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Duration</div>
+          <div className="text-4xl font-bold text-neon-yellow">
+            {result.gameMode === 'words' ? `${result.completionTime}s` : `${result.duration}s`}
+          </div>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">
+            {result.gameMode === 'words' ? 'Time' : 'Duration'}
+          </div>
         </div>
       </div>
 
