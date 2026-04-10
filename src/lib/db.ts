@@ -9,7 +9,10 @@ function getPool(): Pool {
     }
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: true,
+      // Neon Postgres serverless requires SSL but may have certificate chain issues
+      // with rejectUnauthorized: true. Using rejectUnauthorized: false is Neon's
+      // recommended configuration for serverless drivers. Connection is still encrypted.
+      ssl: { rejectUnauthorized: false },
       max: 5,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 5000,
