@@ -10,6 +10,7 @@ interface LeaderboardEntry {
   raw_wpm: number;
   accuracy: string;
   duration_seconds: number;
+  game_mode?: string;
   created_at: string;
   is_current_user: boolean;
 }
@@ -20,6 +21,10 @@ const durations = [
   { label: '30s', value: '30' },
   { label: '60s', value: '60' },
   { label: '120s', value: '120' },
+  { label: '10w', value: 'words-10' },
+  { label: '25w', value: 'words-25' },
+  { label: '50w', value: 'words-50' },
+  { label: '100w', value: 'words-100' },
 ];
 
 export default function LeaderboardPage() {
@@ -35,9 +40,10 @@ export default function LeaderboardPage() {
     try {
       const params = new URLSearchParams();
       if (duration) params.set('duration', duration);
-      if (anonymousId) params.set('anonymousId', anonymousId);
       const url = `/api/leaderboard${params.toString() ? `?${params.toString()}` : ''}`;
-      const res = await fetch(url);
+      const headers: Record<string, string> = {};
+      if (anonymousId) headers['X-Anonymous-Id'] = anonymousId;
+      const res = await fetch(url, { headers });
       if (!res.ok) throw new Error('Failed to fetch leaderboard');
       const data = await res.json();
       setEntries(data.leaderboard || []);
@@ -163,7 +169,11 @@ export default function LeaderboardPage() {
                       <span className="text-gray-400">{Number(entry.accuracy).toFixed(0)}%</span>
                     </td>
                     <td className="py-3 px-4 text-right hidden md:table-cell">
-                      <span className="text-gray-500">{entry.duration_seconds}s</span>
+                      <span className="text-gray-500">
+                        {entry.game_mode?.startsWith('words-')
+                          ? `${entry.game_mode.replace('words-', '')}w / ${entry.duration_seconds}s`
+                          : `${entry.duration_seconds}s`}
+                      </span>
                     </td>
                     <td className="py-3 px-4 text-right hidden md:table-cell">
                       <span className="text-gray-600 text-sm">{formatDate(entry.created_at)}</span>
