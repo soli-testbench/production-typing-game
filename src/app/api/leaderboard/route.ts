@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
                  gr.game_mode
           FROM game_results gr
           JOIN players p ON gr.player_id = p.id
-          WHERE gr.duration_seconds = $1
+          WHERE gr.duration_seconds = $1 AND gr.game_mode = 'classic'
           ORDER BY p.id, gr.wpm DESC, gr.accuracy DESC
         ) sub
         ORDER BY sub.wpm DESC, sub.accuracy DESC
