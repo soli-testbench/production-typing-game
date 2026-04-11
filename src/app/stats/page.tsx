@@ -458,27 +458,36 @@ export default function StatsPage() {
                 <tr className="border-b border-gray-800">
                   <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">WPM</th>
                   <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Accuracy</th>
+                  <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium hidden sm:table-cell">Mode</th>
                   <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Duration</th>
                   <th className="text-right py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Date</th>
                 </tr>
               </thead>
               <tbody>
-                {scores.map((entry) => (
-                  <tr key={entry.id} className="border-b border-gray-800/50 hover:bg-gray-900/30 transition-colors">
-                    <td className="py-3 px-4">
-                      <span className="text-neon-green font-bold">{entry.wpm}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="text-gray-400">{Number(entry.accuracy).toFixed(0)}%</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="text-gray-500">{entry.duration_seconds}s</span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span className="text-gray-600 text-sm">{formatDate(entry.created_at)}</span>
-                    </td>
-                  </tr>
-                ))}
+                {scores.map((entry) => {
+                  const modeLabel = entry.game_mode && entry.game_mode.startsWith('words-')
+                    ? `${entry.game_mode.replace('words-', '')}w`
+                    : `${entry.duration_seconds}s`;
+                  return (
+                    <tr key={entry.id} className="border-b border-gray-800/50 hover:bg-gray-900/30 transition-colors">
+                      <td className="py-3 px-4">
+                        <span className="text-neon-green font-bold">{entry.wpm}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-gray-400">{Number(entry.accuracy).toFixed(0)}%</span>
+                      </td>
+                      <td className="py-3 px-4 hidden sm:table-cell">
+                        <span className="text-gray-500">{modeLabel}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-gray-500">{entry.duration_seconds}s</span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <span className="text-gray-600 text-sm">{formatDate(entry.created_at)}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
