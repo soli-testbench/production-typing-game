@@ -94,9 +94,12 @@ export async function POST(request: NextRequest) {
     if (correctChars > 0 && durationSeconds >= 3) {
       const expectedWpm = (correctChars / 5) / (durationSeconds / 60);
       const wpmDeviation = Math.abs(wpm - expectedWpm) / expectedWpm;
-      if (wpmDeviation > 0.15) {
+      // Sliding tolerance: short tests have more rounding error
+      const tolerance = durationSeconds < 20 ? 0.25 : durationSeconds <= 45 ? 0.20 : 0.15;
+      const tolerancePercent = Math.round(tolerance * 100);
+      if (wpmDeviation > tolerance) {
         return NextResponse.json(
-          { error: `Invalid submission: WPM (${wpm}) does not match expected value based on correct characters (${correctChars}) and duration (${durationSeconds}s). Expected approximately ${Math.round(expectedWpm)} WPM (±15% tolerance).` },
+          { error: `Invalid submission: WPM (${wpm}) does not match expected value based on correct characters (${correctChars}) and duration (${durationSeconds}s). Expected approximately ${Math.round(expectedWpm)} WPM (±${tolerancePercent}% tolerance).` },
           { status: 400 }
         );
       }
