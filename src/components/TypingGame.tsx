@@ -557,7 +557,10 @@ export function TypingGame({
 
   const liveAccuracy = (() => {
     const totalTyped = accumulatedTotalRef.current + typed.length;
-    if (totalTyped === 0) return 100;
+    // Show 0% before the user has typed anything so the live counter
+    // reads "0 WPM / 0%" at the very start of a game — a confidently-
+    // zero baseline reads better than a hard-coded 100% placeholder.
+    if (totalTyped === 0) return 0;
     let correct = 0;
     for (let i = 0; i < typed.length; i++) {
       if (typed[i] === currentPassage[i]) correct++;
@@ -675,14 +678,36 @@ export function TypingGame({
               {isWordMode || isCustomMode ? 'elapsed' : 'seconds'}
             </div>
           </div>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-neon-green">{liveWpm}</div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider">WPM</div>
-          </div>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-neon-purple">{liveAccuracy}%</div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider">accuracy</div>
-          </div>
+          {/* Live WPM and accuracy are intentionally hidden while the
+              game is in the `waiting` state so the user sees only the
+              countdown / elapsed timer before they begin typing. During
+              `running` state they appear as secondary (smaller, dimmer)
+              stats so they provide real-time feedback without competing
+              with the typing area for attention. */}
+          {gameState === 'running' && (
+            <>
+              <div
+                className="text-center transition-opacity duration-200"
+                aria-live="polite"
+                aria-label={`${liveWpm} words per minute`}
+              >
+                <div className="text-xl font-semibold text-neon-green/80 tabular-nums">
+                  {liveWpm}
+                </div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">WPM</div>
+              </div>
+              <div
+                className="text-center transition-opacity duration-200"
+                aria-live="polite"
+                aria-label={`${liveAccuracy} percent accuracy`}
+              >
+                <div className="text-xl font-semibold text-neon-purple/80 tabular-nums">
+                  {liveAccuracy}%
+                </div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider">accuracy</div>
+              </div>
+            </>
+          )}
           {isWordMode && currentWordCount && (
             <div className="text-center">
               <div className="text-3xl font-bold text-neon-yellow">

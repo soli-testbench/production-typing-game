@@ -139,6 +139,20 @@ export default function LeaderboardPage() {
                 <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Rank</th>
                 <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Player</th>
                 <th className="text-right py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium">WPM</th>
+                <th
+                  className="text-right py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium hidden md:table-cell"
+                  title="Raw WPM counts every keystroke, including errors. Net WPM (the primary WPM column) subtracts mistakes, so Raw WPM is always ≥ Net WPM."
+                >
+                  <span className="inline-flex items-center justify-end gap-1">
+                    Raw WPM
+                    <span
+                      aria-hidden="true"
+                      className="text-gray-600 text-[10px] border border-gray-700 rounded-full w-3.5 h-3.5 inline-flex items-center justify-center leading-none cursor-help"
+                    >
+                      i
+                    </span>
+                  </span>
+                </th>
                 <th className="text-right py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium hidden sm:table-cell">Accuracy</th>
                 <th className="text-right py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium hidden md:table-cell">Duration</th>
                 <th className="text-right py-3 px-4 text-xs text-gray-500 uppercase tracking-wider font-medium hidden md:table-cell">Date</th>
@@ -174,6 +188,12 @@ export default function LeaderboardPage() {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <span className="text-neon-green font-bold">{entry.wpm}</span>
+                    </td>
+                    <td
+                      className="py-3 px-4 text-right hidden md:table-cell"
+                      title="Raw WPM counts every keystroke, including errors. Net WPM (the WPM column) subtracts mistakes."
+                    >
+                      <span className="text-gray-400 tabular-nums">{entry.raw_wpm}</span>
                     </td>
                     <td className="py-3 px-4 text-right hidden sm:table-cell">
                       <span className="text-gray-400">{Number(entry.accuracy).toFixed(0)}%</span>
