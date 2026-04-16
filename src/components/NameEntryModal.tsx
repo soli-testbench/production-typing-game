@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
+import { sanitizeName, MAX_PLAYER_NAME_LENGTH } from '@/lib/sanitize-name';
 
 interface NameEntryModalProps {
   onClose: () => void;
@@ -59,10 +60,15 @@ export function NameEntryModal({ onClose, onSaved }: NameEntryModalProps) {
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [handleKeyDown]);
 
+  // Validation mirrors the shared `sanitizeName` used by both the
+  // PlayerProvider and the /api/scores route so the client, the client
+  // provider, and the server all agree on exactly which names are
+  // accepted. If `sanitizeName` reduces the input to an empty string, the
+  // name is rejected; otherwise the sanitized form is what will be saved.
   const validate = (value: string): string => {
     if (!value.trim()) return 'Name is required';
-    if (value.trim().length > 20) return 'Name must be 20 characters or fewer';
-    if (!/^[a-zA-Z0-9 ]+$/.test(value.trim())) return 'Only letters, numbers, and spaces allowed';
+    const sanitized = sanitizeName(value);
+    if (!sanitized) return 'Only letters, numbers, and spaces allowed';
     return '';
   };
 
@@ -73,7 +79,7 @@ export function NameEntryModal({ onClose, onSaved }: NameEntryModalProps) {
       setError(validationError);
       return;
     }
-    setPlayerName(name.trim());
+    setPlayerName(name);
     onSaved?.();
     onClose();
   };
@@ -104,7 +110,7 @@ export function NameEntryModal({ onClose, onSaved }: NameEntryModalProps) {
             value={name}
             onChange={handleChange}
             placeholder="Your display name"
-            maxLength={20}
+            maxLength={MAX_PLAYER_NAME_LENGTH}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"

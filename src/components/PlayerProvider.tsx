@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { sanitizeName } from '@/lib/sanitize-name';
 
 interface PlayerContextType {
   playerName: string;
@@ -84,7 +85,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setPlayerName = useCallback((name: string) => {
-    const sanitized = name.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20).trim();
+    const sanitized = sanitizeName(name);
     setPlayerNameState(sanitized);
     setIsNameSet(!!sanitized);
 

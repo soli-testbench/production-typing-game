@@ -4,10 +4,7 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { checkDurationRateLimit } from '@/lib/duration-rate-limit';
 import { getClientIp } from '@/lib/request-utils';
 import { calculateWpm, calculateAccuracy } from '@/lib/typing-utils';
-
-function sanitizeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20).trim();
-}
+import { sanitizeName } from '@/lib/sanitize-name';
 
 export async function POST(request: NextRequest) {
   try {
