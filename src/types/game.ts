@@ -11,4 +11,5 @@ export interface GameResult {
   gameMode: 'time' | 'words';
   wordCount?: number;
   completionTime?: number;
+  practiceMode?: boolean;
 }

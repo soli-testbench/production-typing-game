@@ -362,8 +362,10 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     }
   }, [playerName, anonymousId, result, saved, maxRetries]);
 
-  // Auto-save when name is already set on mount, or auto-show modal if no name
+  // Auto-save when name is already set on mount, or auto-show modal if no name.
+  // Skip entirely in practice mode — scores should not be saved.
   useEffect(() => {
+    if (result.practiceMode) return;
     if (isNameSet && !saved && !saveAttemptedRef.current) {
       saveScore();
     } else if (!isNameSet && !autoModalShownRef.current) {
@@ -455,13 +457,22 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
 
   return (
     <div className="max-w-2xl mx-auto animate-fade-in">
-      <h2 className="text-3xl font-bold text-center mb-8">
+      <h2 className="text-3xl font-bold text-center mb-4">
         <span className="text-neon-blue">Test</span>{' '}
         <span className="text-gray-300">Complete</span>
       </h2>
 
+      {/* Practice Mode Badge */}
+      {result.practiceMode && (
+        <div className="flex justify-center mb-6">
+          <div className="px-4 py-1.5 bg-neon-yellow/10 border border-neon-yellow/40 rounded-full text-neon-yellow text-xs font-semibold uppercase tracking-wider">
+            Practice Mode — score not saved
+          </div>
+        </div>
+      )}
+
       {/* Personal Best Notification */}
-      {personalBest && <PersonalBestBanner info={personalBest} />}
+      {!result.practiceMode && personalBest && <PersonalBestBanner info={personalBest} />}
 
       {/* Main Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -510,8 +521,8 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         </div>
       </div>
 
-      {/* Save Score */}
-      {!saved && (
+      {/* Save Score — hidden in practice mode since no score is saved */}
+      {!result.practiceMode && !saved && (
         <div className="text-center mb-6">
           <button
             onClick={handleSaveClick}
@@ -523,7 +534,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
           {saveError && <p className="text-red-400 text-sm mt-2">{saveError}</p>}
         </div>
       )}
-      {saved && (
+      {!result.practiceMode && saved && (
         <div className="text-center mb-6">
           <p className="text-neon-green text-sm">Score saved to leaderboard!</p>
         </div>
@@ -553,7 +564,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         </button>
       </div>
 
-      {showNameModal && (
+      {!result.practiceMode && showNameModal && (
         <NameEntryModal
           onClose={handleModalDismiss}
           onSaved={() => {
