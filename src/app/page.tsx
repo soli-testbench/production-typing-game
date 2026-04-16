@@ -155,6 +155,32 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Custom Text Mode */}
+      <div className="w-full max-w-4xl mt-12">
+        <h2 className="text-2xl font-semibold text-gray-300 mb-6 text-center">
+          Bring Your Own Text
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+          <Link
+            href="/game?mode=custom"
+            className="card-hover block bg-gray-900/80 border border-neon-pink/30 rounded-xl p-6 text-center group hover:shadow-[0_0_30px_rgba(255,0,110,0.2)] transition-all duration-300 sm:col-span-2 lg:col-span-4"
+          >
+            <div className="text-4xl mb-3">📋</div>
+            <h3 className="text-xl font-bold text-neon-pink mb-2">
+              Custom Text
+            </h3>
+            <p className="text-gray-400 text-sm leading-relaxed max-w-xl mx-auto">
+              Paste your own passage and practice against it. Great for drilling
+              on specific content like code snippets, poems, or articles.
+              Runs in practice mode — scores are not saved.
+            </p>
+            <div className="mt-4 text-sm text-neon-pink opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+              Enter Text →
+            </div>
+          </Link>
+        </div>
+      </div>
+
       {/* Quick Stats / CTA */}
       <div className="mt-16 text-center">
         <Link
