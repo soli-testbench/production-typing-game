@@ -521,7 +521,23 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     const modeDesc = result.gameMode === 'words'
       ? `${result.wordCount}-word test in ${result.completionTime}s`
       : `${result.duration}s test`;
-    const shareText = `I just typed ${result.wpm} WPM with ${result.accuracy}% accuracy on a ${modeDesc} on TypeRacer Pro! \uD83C\uDFAF`;
+
+    // Use the player's name when it's set and is not the anonymous fallback,
+    // otherwise fall back to "I" so the share text still reads naturally.
+    // Trimmed to avoid odd whitespace if a name was saved with trailing spaces.
+    const trimmedName = (playerName ?? '').trim();
+    const useName = isNameSet && trimmedName.length > 0 && trimmedName !== 'Anonymous';
+    const subject = useName ? `${trimmedName} just typed` : 'I just typed';
+
+    // Prefer the current window's origin so shares from a staging/preview
+    // deployment link back to that same environment. Fall back to the root
+    // path when rendered outside a browser context (defensive).
+    const appUrl =
+      typeof window !== 'undefined' && window.location && window.location.origin
+        ? window.location.origin + '/'
+        : '/';
+
+    const shareText = `${subject} ${result.wpm} WPM with ${result.accuracy}% accuracy on a ${modeDesc} on TypeRacer Pro! \uD83C\uDFAF ${appUrl}`;
 
     try {
       if (typeof navigator !== 'undefined' && navigator.share) {

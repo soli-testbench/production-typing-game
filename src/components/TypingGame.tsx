@@ -49,6 +49,23 @@ interface TypingGameProps {
   duration: number;
   wordCount?: number;
   initialPracticeMode?: boolean;
+  /**
+   * When provided, the game locks to this exact passage text instead of
+   * pulling from the built-in `passages` pool or the `generateWordPassage`
+   * generator. Tab still restarts with the same custom text. Pressing Esc
+   * (either during a test or on the results screen) invokes `onExit`
+   * instead of loading a new random passage.
+   *
+   * Custom-text games always run in practice mode: scores are not saved.
+   */
+  customText?: string;
+  /**
+   * Called when the user wants to leave the typing screen entirely — e.g.
+   * pressing Esc in custom-text mode to return to the text-entry screen.
+   * When omitted, Esc falls back to the default behavior of loading a new
+   * random passage.
+   */
+  onExit?: () => void;
 }
 
 type GameState = 'waiting' | 'running' | 'finished';
@@ -123,11 +140,20 @@ function generateWordPassage(count: number): string {
   return selected.join(' ');
 }
 
-export function TypingGame({ mode = 'time', duration, wordCount, initialPracticeMode = false }: TypingGameProps) {
+export function TypingGame({
+  mode = 'time',
+  duration,
+  wordCount,
+  initialPracticeMode = false,
+  customText,
+  onExit,
+}: TypingGameProps) {
   const isWordMode = mode === 'words';
-  const [currentPassage, setCurrentPassage] = useState(() =>
-    isWordMode && wordCount ? generateWordPassage(wordCount) : getRandomPassage()
-  );
+  const isCustomMode = typeof customText === 'string' && customText.length > 0;
+  const [currentPassage, setCurrentPassage] = useState(() => {
+    if (isCustomMode) return customText as string;
+    return isWordMode && wordCount ? generateWordPassage(wordCount) : getRandomPassage();
+  });
   const [typed, setTyped] = useState('');
   const [gameState, setGameState] = useState<GameState>('waiting');
   const [timeLeft, setTimeLeft] = useState(duration);
@@ -138,7 +164,9 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
   const [currentWordCount, setCurrentWordCount] = useState(wordCount);
   const [completedPassages, setCompletedPassages] = useState<PassageRecord[]>([]);
   const [wpmSamples, setWpmSamples] = useState<number[]>([]);
-  const [practiceMode, setPracticeMode] = useState(initialPracticeMode);
+  // Custom-text mode is always in practice mode (scores are never saved)
+  // regardless of what was passed via `initialPracticeMode`.
+  const [practiceMode, setPracticeMode] = useState(isCustomMode ? true : initialPracticeMode);
   const [pasteBlocked, setPasteBlocked] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -202,13 +230,13 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     const totalCorrect = accumulatedCorrectRef.current + currentCorrect;
     const totalIncorrect = accumulatedIncorrectRef.current + currentIncorrect;
     const totalChars = accumulatedTotalRef.current + typed.length;
-    const elapsedSeconds = overrideElapsedSeconds ?? (isWordMode && startTime ? (Date.now() - startTime) / 1000 : currentDuration);
+    const elapsedSeconds = overrideElapsedSeconds ?? ((isWordMode || isCustomMode) && startTime ? (Date.now() - startTime) / 1000 : currentDuration);
     const wpm = calculateWpm(totalCorrect, elapsedSeconds);
     const rawWpm = calculateRawWpm(totalChars, elapsedSeconds);
     const accuracy = totalChars > 0 ? calculateAccuracy(totalCorrect, totalChars) : 0;
 
     return { wpm, rawWpm, accuracy, correctChars: totalCorrect, incorrectChars: totalIncorrect, totalChars };
-  }, [typed, currentPassage, currentDuration, isWordMode, startTime]);
+  }, [typed, currentPassage, currentDuration, isWordMode, isCustomMode, startTime]);
 
   const finishGame = useCallback(() => {
     if (timerRef.current) {
@@ -216,24 +244,27 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       timerRef.current = null;
     }
     const completionTimeSeconds = startTime ? (Date.now() - startTime) / 1000 : 0;
-    const stats = calculateAggregateStats(isWordMode ? completionTimeSeconds : undefined);
+    // Word mode and custom-text mode are both count-up "finish the passage"
+    // games — their duration is the wall-clock time it took to finish, not
+    // a pre-set test length.
+    const stats = calculateAggregateStats(isWordMode || isCustomMode ? completionTimeSeconds : undefined);
     const allPassageText = [
       ...completedPassages.map((p) => p.text),
       currentPassage,
     ].join(' | ');
     setResult({
       ...stats,
-      duration: isWordMode ? Math.round(completionTimeSeconds) : currentDuration,
+      duration: isWordMode || isCustomMode ? Math.round(completionTimeSeconds) : currentDuration,
       passage: allPassageText,
       wpmSamples,
       gameMode: isWordMode ? 'words' : 'time',
       wordCount: isWordMode ? currentWordCount : undefined,
-      completionTime: isWordMode ? Math.round(completionTimeSeconds * 10) / 10 : undefined,
+      completionTime: isWordMode || isCustomMode ? Math.round(completionTimeSeconds * 10) / 10 : undefined,
       practiceMode,
       troubleCharacters: buildTroubleCharacters(errorMapRef.current),
     });
     setGameState('finished');
-  }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples, startTime, isWordMode, currentWordCount, practiceMode]);
+  }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples, startTime, isWordMode, isCustomMode, currentWordCount, practiceMode]);
 
   const resetGame = useCallback((options?: { newPassage?: boolean; newDuration?: number; newWordCount?: number }) => {
     if (timerRef.current) {
@@ -248,7 +279,11 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     if (options?.newWordCount !== undefined) {
       setCurrentWordCount(wc);
     }
-    if (isWordMode) {
+    if (isCustomMode) {
+      // In custom-text mode the passage is owned by the parent; never
+      // regenerate here. Tab restarts with the same text, and Esc is
+      // intercepted by the Esc handler to call `onExit` instead.
+    } else if (isWordMode) {
       // Only regenerate word passage when explicitly requesting new text or when word count changes
       if (options?.newPassage || options?.newWordCount !== undefined) {
         setCurrentPassage(generateWordPassage(wc || 25));
@@ -278,15 +313,15 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     } else {
       queueMicrotask(focusInput);
     }
-  }, [currentDuration, currentPassage, isWordMode, currentWordCount]);
+  }, [currentDuration, currentPassage, isWordMode, currentWordCount, isCustomMode]);
 
   const startGame = useCallback(() => {
     setGameState('running');
     const now = Date.now();
     setStartTime(now);
 
-    if (isWordMode) {
-      // Count up timer for word mode, derived from wall-clock elapsed time
+    if (isWordMode || isCustomMode) {
+      // Count up timer for word / custom-text mode, derived from wall-clock elapsed time.
       setElapsedTime(0);
       timerRef.current = setInterval(() => {
         setElapsedTime(Math.floor((Date.now() - now) / 1000));
@@ -301,7 +336,7 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
         setTimeLeft(Math.ceil(remaining));
       }, 200);
     }
-  }, [currentDuration, isWordMode]);
+  }, [currentDuration, isWordMode, isCustomMode]);
 
   // Sample WPM every second when game is running
   useEffect(() => {
@@ -325,12 +360,13 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     return () => clearInterval(sampleInterval);
   }, [gameState, startTime, currentPassage]);
 
-  // Handle timer reaching 0 (time mode only)
+  // Handle timer reaching 0 (time mode only; word / custom-text mode finish
+  // when the passage is completed instead).
   useEffect(() => {
-    if (!isWordMode && timeLeft === 0 && gameState === 'running') {
+    if (!isWordMode && !isCustomMode && timeLeft === 0 && gameState === 'running') {
       finishGame();
     }
-  }, [timeLeft, gameState, finishGame, isWordMode]);
+  }, [timeLeft, gameState, finishGame, isWordMode, isCustomMode]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -339,12 +375,14 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     };
   }, []);
 
-  // Handle duration change from URL
+  // Handle duration change from URL. Skipped in custom-text mode since the
+  // passage / "duration" of that mode is owned by the parent screen.
   useEffect(() => {
+    if (isCustomMode) return;
     if (duration !== currentDuration) {
       resetGame({ newDuration: duration });
     }
-  }, [duration, currentDuration, resetGame]);
+  }, [duration, currentDuration, resetGame, isCustomMode]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -354,12 +392,18 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
         resetGame();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        resetGame({ newPassage: true });
+        // In custom-text mode Esc returns the user to the text-entry screen
+        // rather than swapping in a new random passage.
+        if (onExit) {
+          onExit();
+        } else {
+          resetGame({ newPassage: true });
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [resetGame]);
+  }, [resetGame, onExit]);
 
   // Auto-focus input
   useEffect(() => {
@@ -449,7 +493,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       accumulatedTotalRef.current += currentPassage.length;
 
       // In word mode, finishing the passage means the game is done
-      if (isWordMode) {
+      if (isWordMode || isCustomMode) {
+        // Word mode and custom-text mode both finish immediately when the
+        // user reaches the end of the passage. (In time mode we chain into
+        // a new random passage instead.)
         const completedTyped = value.slice(0, currentPassage.length);
         const completedText = currentPassage;
         setCompletedPassages((prev) => [...prev, { text: completedText, typed: completedTyped }]);
@@ -544,6 +591,12 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       if (!currentWordCount || currentWordCount <= 0) return 0;
       return Math.min(100, (wordsCompleted / currentWordCount) * 100);
     }
+    if (isCustomMode) {
+      // For custom-text mode, progress is measured as characters typed in
+      // the current passage divided by the total passage length.
+      if (!currentPassage || currentPassage.length === 0) return 0;
+      return Math.min(100, Math.max(0, (typed.length / currentPassage.length) * 100));
+    }
     if (currentDuration <= 0) return 0;
     const elapsed = currentDuration - timeLeft;
     return Math.min(100, Math.max(0, (elapsed / currentDuration) * 100));
@@ -554,7 +607,17 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       <ResultsScreen
         result={result}
         onRetry={() => resetGame()}
-        onNewTest={() => resetGame({ newPassage: true })}
+        onNewTest={() => {
+          // In custom-text mode, "new test" (Esc on the results screen)
+          // returns to the text-entry screen so the user can paste a
+          // different passage. In all other modes it swaps in a fresh
+          // random passage in place.
+          if (onExit) {
+            onExit();
+          } else {
+            resetGame({ newPassage: true });
+          }
+        }}
       />
     );
   }
@@ -570,11 +633,13 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
             aria-checked={practiceMode}
             aria-label="Toggle practice mode"
             onClick={() => {
+              // Custom-text mode is always in practice mode and the toggle is locked.
+              if (isCustomMode) return;
               if (gameState === 'waiting') {
                 setPracticeMode((v) => !v);
               }
             }}
-            disabled={gameState !== 'waiting'}
+            disabled={isCustomMode || gameState !== 'waiting'}
             className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-neon-yellow/50 disabled:opacity-60 disabled:cursor-not-allowed ${
               practiceMode ? 'bg-neon-yellow/40 border border-neon-yellow/60' : 'bg-gray-800 border border-gray-700'
             }`}
@@ -604,10 +669,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
         <div className="flex items-center gap-6">
           <div className="text-center">
             <div className="text-3xl font-bold text-neon-blue">
-              {isWordMode ? elapsedTime : timeLeft}
+              {isWordMode || isCustomMode ? elapsedTime : timeLeft}
             </div>
             <div className="text-xs text-gray-500 uppercase tracking-wider">
-              {isWordMode ? 'elapsed' : 'seconds'}
+              {isWordMode || isCustomMode ? 'elapsed' : 'seconds'}
             </div>
           </div>
           <div className="text-center">
@@ -769,7 +834,7 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(overallProgressPercent)}
-        aria-label={isWordMode ? 'Words completed' : 'Time elapsed'}
+        aria-label={isWordMode ? 'Words completed' : isCustomMode ? 'Passage progress' : 'Time elapsed'}
       >
         <div
           className="h-full bg-gradient-to-r from-neon-blue via-neon-purple to-neon-pink transition-all duration-200 ease-out"
