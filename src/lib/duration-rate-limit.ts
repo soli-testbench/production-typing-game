@@ -31,10 +31,15 @@ setInterval(cleanupExpiredEntries, CLEANUP_INTERVAL_MS);
 
 export function checkDurationRateLimit(
   ip: string,
-  durationSeconds: number
+  durationSeconds: number,
+  keyModifier?: string
 ): { allowed: boolean; retryAfter?: number } {
   const now = Date.now();
-  const key = `${ip}:${durationSeconds}`;
+  // For word mode, callers pass a keyModifier (e.g. 'words-25') so the rate-limit
+  // bucket is keyed by word count rather than the fractional completion time.
+  // This prevents a cheater from bypassing the limit by varying the reported
+  // duration slightly (12.4s vs 12.5s vs 12.6s).
+  const key = `${ip}:${keyModifier ?? durationSeconds}`;
   const lastSubmission = durationRateLimitMap.get(key);
   const minInterval = getMinInterval(durationSeconds);
 
