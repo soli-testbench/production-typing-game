@@ -260,7 +260,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     };
   }, []);
 
-  const saveScore = useCallback(async (attempt = 0) => {
+  const saveScore = useCallback(async (attempt = 0, nameOverride?: string) => {
     if (saved) return;
     if (attempt === 0) {
       if (saveAttemptedRef.current) return;
@@ -271,12 +271,13 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     }
     setSaving(true);
     setSaveError('');
+    const effectivePlayerName = nameOverride ?? playerName;
     try {
       const res = await fetch('/api/scores', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          playerName,
+          playerName: effectivePlayerName,
           anonymousId,
           gameMode: result.gameMode === 'words' ? `words-${result.wordCount}` : 'classic',
           wpm: result.wpm,
@@ -372,6 +373,16 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Called when the name-entry modal is dismissed without a name being set.
+  // Auto-save the score under 'Anonymous' so the save flow never hits a dead end.
+  // Personal best tracking still works because it is tied to anonymousId, not playerName.
+  const handleModalDismiss = useCallback(() => {
+    setShowNameModal(false);
+    if (!isNameSet && !saved && !saveAttemptedRef.current) {
+      saveScore(0, 'Anonymous');
+    }
+  }, [isNameSet, saved, saveScore]);
+
   // Keyboard shortcuts for results screen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -394,6 +405,12 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
       saveScore();
     }
   };
+
+  const saveButtonLabel = retrying
+    ? `Retrying... (${retryCount}/${maxRetries})`
+    : saving
+      ? 'Saving...'
+      : 'Save Score to Leaderboard';
 
   const handleShare = async () => {
     const modeDesc = result.gameMode === 'words'
@@ -444,7 +461,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
       </h2>
 
       {/* Personal Best Notification */}
-      {isNameSet && personalBest && <PersonalBestBanner info={personalBest} />}
+      {personalBest && <PersonalBestBanner info={personalBest} />}
 
       {/* Main Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -501,7 +518,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
             disabled={saving || retrying}
             className="px-6 py-2.5 bg-neon-blue/20 text-neon-blue border border-neon-blue/30 rounded-lg hover:bg-neon-blue/30 transition-colors disabled:opacity-50 font-medium"
           >
-            {retrying ? `Retrying... (${retryCount}/${maxRetries})` : saving ? 'Saving...' : isNameSet ? 'Save Score to Leaderboard' : 'Set Name & Save Score'}
+            {saveButtonLabel}
           </button>
           {saveError && <p className="text-red-400 text-sm mt-2">{saveError}</p>}
         </div>
@@ -538,7 +555,7 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
 
       {showNameModal && (
         <NameEntryModal
-          onClose={() => setShowNameModal(false)}
+          onClose={handleModalDismiss}
           onSaved={() => {
             setShowNameModal(false);
             saveScore();

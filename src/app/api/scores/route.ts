@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
     // Determine game mode early for use in validation
     const validWordModes = ['words-10', 'words-25', 'words-50', 'words-100'];
     const isWordMode = validWordModes.includes(gameMode);
+    const wordCount = isWordMode ? parseInt((gameMode as string).replace('words-', ''), 10) : null;
 
     // Validate WPM (0-300 for time mode, 0-500 for word mode to handle burst typing on short tests)
     const wpmCap = isWordMode ? 500 : 300;
@@ -66,6 +67,18 @@ export async function POST(request: NextRequest) {
     }
     if (isWordMode && (typeof durationSeconds !== 'number' || durationSeconds < 0.1 || durationSeconds > 3600)) {
       return NextResponse.json({ error: 'Duration must be between 0.1 and 3600 seconds for word mode' }, { status: 400 });
+    }
+
+    // Minimum completion time sanity check for word mode: reject impossibly fast submissions.
+    // Floor is wordCount / 4 seconds (equivalent to ~300 WPM, faster than any legitimate typist sustains).
+    if (isWordMode && wordCount !== null) {
+      const minCompletionTime = wordCount / 4;
+      if (durationSeconds < minCompletionTime) {
+        return NextResponse.json(
+          { error: `Invalid submission: completion time (${durationSeconds}s) is impossibly fast for ${wordCount} words (minimum ${minCompletionTime}s).` },
+          { status: 400 }
+        );
+      }
     }
 
     // Validate character counts
@@ -121,15 +134,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Duration-aware rate limiting: prevent submitting faster than test duration allows
-    if (!isWordMode) {
-      const durationRateCheck = checkDurationRateLimit(ip, durationSeconds);
-      if (!durationRateCheck.allowed) {
-        return NextResponse.json(
-          { error: `Submission too frequent for a ${durationSeconds}s test. Try again in ${durationRateCheck.retryAfter} seconds.` },
-          { status: 429, headers: { 'Retry-After': String(durationRateCheck.retryAfter) } }
-        );
-      }
+    // Duration-aware rate limiting: prevent submitting faster than test duration allows.
+    // For word mode, segment the rate limit bucket by word count (not fractional duration)
+    // so users can't bypass it by varying their reported completion time slightly.
+    const rateLimitKey = isWordMode ? `words-${wordCount}` : undefined;
+    const durationRateCheck = checkDurationRateLimit(ip, durationSeconds, rateLimitKey);
+    if (!durationRateCheck.allowed) {
+      const testLabel = isWordMode ? `${wordCount}-word` : `${durationSeconds}s`;
+      return NextResponse.json(
+        { error: `Submission too frequent for a ${testLabel} test. Try again in ${durationRateCheck.retryAfter} seconds.` },
+        { status: 429, headers: { 'Retry-After': String(durationRateCheck.retryAfter) } }
+      );
     }
 
     await ensureMigrations();
@@ -144,14 +159,24 @@ export async function POST(request: NextRequest) {
     );
     const playerId = playerResult.rows[0].id;
 
-    // Fetch previous best WPM for this duration and game mode before inserting the new score
+    // Fetch previous best WPM before inserting the new score.
+    // For word mode, compare against all scores with the same game_mode (e.g., 'words-25')
+    // regardless of duration_seconds, since word mode completion times differ every run.
+    // For timed mode, continue to match on duration_seconds so 15s/30s/60s/120s bests are separate.
     const effectiveGameMode = gameMode || 'classic';
-    const previousBestResult = await query(
-      `SELECT MAX(gr.wpm) as best_wpm
-       FROM game_results gr
-       WHERE gr.player_id = $1 AND gr.duration_seconds = $2 AND gr.game_mode = $3`,
-      [playerId, durationSeconds, effectiveGameMode]
-    );
+    const previousBestResult = isWordMode
+      ? await query(
+          `SELECT MAX(gr.wpm) as best_wpm
+           FROM game_results gr
+           WHERE gr.player_id = $1 AND gr.game_mode = $2`,
+          [playerId, effectiveGameMode]
+        )
+      : await query(
+          `SELECT MAX(gr.wpm) as best_wpm
+           FROM game_results gr
+           WHERE gr.player_id = $1 AND gr.duration_seconds = $2 AND gr.game_mode = $3`,
+          [playerId, durationSeconds, effectiveGameMode]
+        );
     const previousBestWpm: number | null = previousBestResult.rows[0]?.best_wpm ?? null;
 
     // Insert game result
