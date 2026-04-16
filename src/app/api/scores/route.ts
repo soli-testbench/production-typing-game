@@ -3,6 +3,7 @@ import { query, ensureMigrations, isConnectionError, sanitizeErrorMessage } from
 import { checkRateLimit } from '@/lib/rate-limit';
 import { checkDurationRateLimit } from '@/lib/duration-rate-limit';
 import { getClientIp } from '@/lib/request-utils';
+import { calculateWpm, calculateAccuracy } from '@/lib/typing-utils';
 
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20).trim();
@@ -105,30 +106,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Cross-validate WPM against character counts and duration
-    // Skip validation for very short durations (under 3 seconds) where rounding causes large deviations
+    // Cross-validate WPM against character counts and duration using the
+    // shared client/server formula. Skip validation for very short durations
+    // (under 3 seconds) where integer rounding of the reported WPM produces
+    // proportionally large deviations.
     if (correctChars > 0 && durationSeconds >= 3) {
-      const expectedWpm = (correctChars / 5) / (durationSeconds / 60);
-      const wpmDeviation = Math.abs(wpm - expectedWpm) / expectedWpm;
+      const expectedWpm = calculateWpm(correctChars, durationSeconds);
+      const wpmDeviation = expectedWpm > 0 ? Math.abs(wpm - expectedWpm) / expectedWpm : 0;
       // Sliding tolerance: short tests have more rounding error
       const tolerance = durationSeconds < 20 ? 0.25 : durationSeconds <= 45 ? 0.20 : 0.15;
       const tolerancePercent = Math.round(tolerance * 100);
       if (wpmDeviation > tolerance) {
         return NextResponse.json(
-          { error: `Invalid submission: WPM (${wpm}) does not match expected value based on correct characters (${correctChars}) and duration (${durationSeconds}s). Expected approximately ${Math.round(expectedWpm)} WPM (±${tolerancePercent}% tolerance).` },
+          { error: `Invalid submission: WPM (${wpm}) does not match expected value based on correct characters (${correctChars}) and duration (${durationSeconds}s). Expected approximately ${expectedWpm} WPM (±${tolerancePercent}% tolerance).` },
           { status: 400 }
         );
       }
     }
 
-    // Cross-validate accuracy against character counts
+    // Cross-validate accuracy against character counts using the shared formula.
     const totalChars = correctChars + incorrectChars;
     if (totalChars > 0) {
-      const expectedAccuracy = (correctChars / totalChars) * 100;
+      const expectedAccuracy = calculateAccuracy(correctChars, totalChars);
       const accuracyDeviation = Math.abs(accuracy - expectedAccuracy);
       if (accuracyDeviation > 3) {
         return NextResponse.json(
-          { error: `Invalid submission: accuracy (${accuracy}%) does not match expected value based on character counts. Expected approximately ${Math.round(expectedAccuracy)}% (±3% tolerance).` },
+          { error: `Invalid submission: accuracy (${accuracy}%) does not match expected value based on character counts. Expected approximately ${expectedAccuracy}% (±3% tolerance).` },
           { status: 400 }
         );
       }

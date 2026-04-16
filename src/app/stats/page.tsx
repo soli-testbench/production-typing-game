@@ -22,6 +22,12 @@ interface TrendMode {
 }
 
 function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
+  // This chart now plots WPM and accuracy together, with two Y-axes:
+  //   - Left axis (neon-blue):   WPM   (0 .. max WPM)
+  //   - Right axis (neon-yellow): Accuracy (0 .. 100)
+  // Both lines follow the same X (game number in chronological order) so
+  // the user can see how improvements in speed correlate with accuracy.
+
   // Determine available modes and their game counts
   const modeCounts: Record<string, number> = {};
   for (const s of scores) {
@@ -69,6 +75,7 @@ function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
   const chronological = [...filteredScores].reverse();
   const trendGames = chronological.slice(-Math.max(20, chronological.length));
   const samples = trendGames.map((s) => s.wpm);
+  const accuracySamples = trendGames.map((s) => Number(s.accuracy));
 
   const selectedLabel = allModes.find((m) => m.key === selectedMode)?.label || selectedMode;
 
@@ -126,6 +133,15 @@ function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
 
   const avgWpm = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
   const avgY = padding.top + chartHeight - ((avgWpm - minWpm) / yRange) * chartHeight;
+
+  // Accuracy line: second Y-axis on the right, fixed 0–100 range.
+  const accPoints = accuracySamples.map((acc, i) => ({
+    x: padding.left + i * xStep,
+    y: padding.top + chartHeight - (acc / 100) * chartHeight,
+  }));
+  const accPathD = accPoints
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
+    .join(' ');
 
   const yTickCount = 5;
   const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => {
@@ -220,6 +236,44 @@ function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
           />
         ))}
 
+        {/* Accuracy line (right-axis, 0–100 scale) */}
+        <path
+          d={accPathD}
+          fill="none"
+          stroke="#ffbe0b"
+          strokeWidth="2"
+          strokeDasharray="4 3"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {accPoints.map((p, i) => (
+          <circle
+            key={`acc-dot-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r="2"
+            fill="#ffbe0b"
+            opacity="0.8"
+          />
+        ))}
+
+        {/* Right-side accuracy axis labels (0%, 25%, 50%, 75%, 100%) */}
+        {[0, 25, 50, 75, 100].map((pct) => {
+          const y = padding.top + chartHeight - (pct / 100) * chartHeight;
+          return (
+            <text
+              key={`acc-label-${pct}`}
+              x={viewBoxWidth - padding.right + 6}
+              y={y + 3}
+              fill="#ffbe0b"
+              fontSize="9"
+              opacity="0.8"
+            >
+              {pct}%
+            </text>
+          );
+        })}
+
         {yTicks.map((tick) => (
           <text
             key={`ylabel-${tick.val}`}
@@ -273,6 +327,22 @@ function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
           </linearGradient>
         </defs>
       </svg>
+
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-6 mt-2 text-xs">
+        <span className="flex items-center gap-2 text-neon-blue">
+          <span className="inline-block w-4 h-0.5 bg-neon-blue" aria-hidden="true" />
+          WPM
+        </span>
+        <span className="flex items-center gap-2 text-neon-yellow">
+          <span
+            className="inline-block w-4 h-0.5 bg-neon-yellow"
+            style={{ borderTop: '2px dashed currentColor', height: 0 }}
+            aria-hidden="true"
+          />
+          Accuracy
+        </span>
+      </div>
     </div>
   );
 }
@@ -350,6 +420,46 @@ export default function StatsPage() {
     ? (scores.reduce((sum, s) => sum + Number(s.accuracy), 0) / totalGames).toFixed(1)
     : '0.0';
 
+  // Total characters typed across all games (correct + incorrect).
+  const totalCharactersTyped = scores.reduce(
+    (sum, s) => sum + (s.correct_chars || 0) + (s.incorrect_chars || 0),
+    0
+  );
+
+  // Best single-game highlights (best WPM and best accuracy across *any*
+  // mode/duration). Useful as an at-a-glance personal-best summary in
+  // addition to the per-duration / per-word-count breakdowns below.
+  const bestSingleGameWpm = totalGames > 0
+    ? scores.reduce((best, s) => (s.wpm > best ? s.wpm : best), 0)
+    : 0;
+  const bestSingleGameAccuracy = totalGames > 0
+    ? scores.reduce((best, s) => (Number(s.accuracy) > best ? Number(s.accuracy) : best), 0)
+    : 0;
+
+  // Improvement rate: compare the average WPM of the 5 most-recent games
+  // against the 5 games immediately before them. The scores array is
+  // returned newest-first from the API, so `recent` is the head slice.
+  // Falls back to null when there are not enough games to make the
+  // comparison meaningful.
+  const improvement = (() => {
+    if (totalGames < 6) return null;
+    const recent = scores.slice(0, 5);
+    const previous = scores.slice(5, 10);
+    if (previous.length === 0) return null;
+    const avg = (arr: ScoreEntry[]) => arr.reduce((s, x) => s + x.wpm, 0) / arr.length;
+    const recentAvg = avg(recent);
+    const previousAvg = avg(previous);
+    const deltaWpm = recentAvg - previousAvg;
+    const pct = previousAvg > 0 ? (deltaWpm / previousAvg) * 100 : 0;
+    return {
+      recentAvg: Math.round(recentAvg),
+      previousAvg: Math.round(previousAvg),
+      deltaWpm: Math.round(deltaWpm),
+      pct: Math.round(pct),
+      sampleSize: Math.min(previous.length, 5),
+    };
+  })();
+
 
   return (
     <div className="max-w-4xl mx-auto animate-fade-in">
@@ -398,7 +508,7 @@ export default function StatsPage() {
       {!loading && !error && scores.length > 0 && (
         <>
           {/* Summary Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div className="bg-gray-900/80 border border-neon-blue/20 rounded-xl p-4 text-center">
               <div className="text-4xl font-bold text-neon-blue">{totalGames}</div>
               <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Games Played</div>
@@ -416,6 +526,72 @@ export default function StatsPage() {
               <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Average Accuracy</div>
             </div>
           </div>
+
+          {/* Extra summary stats: total characters typed + single-game bests */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-gray-900/80 border border-neon-pink/20 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-neon-pink">
+                {totalCharactersTyped.toLocaleString()}
+              </div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Total Characters Typed</div>
+            </div>
+            <div className="bg-gray-900/80 border border-neon-green/30 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-neon-green">{bestSingleGameWpm}</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Best Single-Game WPM</div>
+            </div>
+            <div className="bg-gray-900/80 border border-neon-yellow/30 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-neon-yellow">
+                {Number.isFinite(bestSingleGameAccuracy)
+                  ? bestSingleGameAccuracy.toFixed(1)
+                  : '0.0'}
+                %
+              </div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Best Single-Game Accuracy</div>
+            </div>
+          </div>
+
+          {/* Improvement rate (last 5 games vs. previous 5) */}
+          {improvement && (
+            <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
+              <h3 className="text-sm text-gray-400 mb-3 text-center uppercase tracking-wider">
+                Improvement Rate
+              </h3>
+              <div className="flex flex-wrap items-center justify-center gap-6 text-center">
+                <div>
+                  <div className="text-2xl font-bold text-gray-300">{improvement.previousAvg}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">
+                    Previous 5 avg WPM
+                  </div>
+                </div>
+                <div className="text-gray-600 text-2xl">&#x2192;</div>
+                <div>
+                  <div className="text-2xl font-bold text-gray-100">{improvement.recentAvg}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">
+                    Recent 5 avg WPM
+                  </div>
+                </div>
+                <div>
+                  <div
+                    className={`text-2xl font-bold ${
+                      improvement.deltaWpm > 0
+                        ? 'text-neon-green'
+                        : improvement.deltaWpm < 0
+                          ? 'text-red-400'
+                          : 'text-gray-400'
+                    }`}
+                  >
+                    {improvement.deltaWpm > 0 ? '+' : ''}
+                    {improvement.deltaWpm} WPM
+                    <span className="text-sm font-normal text-gray-500 ml-2">
+                      ({improvement.pct > 0 ? '+' : ''}
+                      {improvement.pct}%)
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Change</div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Personal Bests */}
           <h2 className="text-lg font-semibold text-gray-300 mb-4">Personal Bests</h2>

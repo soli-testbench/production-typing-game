@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { passages } from '@/data/passages';
 import { ResultsScreen } from '@/components/ResultsScreen';
 import { GameResult } from '@/types/game';
+import { calculateWpm, calculateRawWpm, calculateAccuracy } from '@/lib/typing-utils';
 
 export type { GameResult } from '@/types/game';
 
@@ -93,10 +94,9 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     const totalIncorrect = accumulatedIncorrectRef.current + currentIncorrect;
     const totalChars = accumulatedTotalRef.current + typed.length;
     const elapsedSeconds = overrideElapsedSeconds ?? (isWordMode && startTime ? (Date.now() - startTime) / 1000 : currentDuration);
-    const elapsedMinutes = Math.max(elapsedSeconds, 1) / 60;
-    const wpm = Math.round(totalCorrect / 5 / elapsedMinutes);
-    const rawWpm = Math.round(totalChars / 5 / elapsedMinutes);
-    const accuracy = totalChars > 0 ? Math.round((totalCorrect / totalChars) * 100) : 0;
+    const wpm = calculateWpm(totalCorrect, elapsedSeconds);
+    const rawWpm = calculateRawWpm(totalChars, elapsedSeconds);
+    const accuracy = totalChars > 0 ? calculateAccuracy(totalCorrect, totalChars) : 0;
 
     return { wpm, rawWpm, accuracy, correctChars: totalCorrect, incorrectChars: totalIncorrect, totalChars };
   }, [typed, currentPassage, currentDuration, isWordMode, startTime]);
@@ -157,7 +157,15 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     accumulatedCorrectRef.current = 0;
     accumulatedIncorrectRef.current = 0;
     accumulatedTotalRef.current = 0;
-    setTimeout(() => inputRef.current?.focus(), 50);
+    // Restore focus immediately on the next animation frame to avoid a
+    // visible flash of the "Click here or start typing to begin..." overlay
+    // that would otherwise appear during the ~50ms gap of a setTimeout.
+    const focusInput = () => inputRef.current?.focus();
+    if (typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(focusInput);
+    } else {
+      queueMicrotask(focusInput);
+    }
   }, [currentDuration, currentPassage, isWordMode, currentWordCount]);
 
   const startGame = useCallback(() => {
@@ -188,9 +196,8 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     if (gameState !== 'running' || !startTime) return;
 
     const sampleInterval = setInterval(() => {
-      const elapsedMs = Date.now() - startTime;
-      const elapsedMinutes = elapsedMs / 1000 / 60;
-      if (elapsedMinutes < 0.01) return;
+      const elapsedSeconds = (Date.now() - startTime) / 1000;
+      if (elapsedSeconds < 0.6) return;
 
       let currentCorrect = 0;
       const typedVal = inputRef.current?.value || '';
@@ -199,7 +206,7 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       }
 
       const totalCorrect = accumulatedCorrectRef.current + currentCorrect;
-      const currentWpm = Math.round(totalCorrect / 5 / elapsedMinutes);
+      const currentWpm = calculateWpm(totalCorrect, elapsedSeconds);
       setWpmSamples((prev) => [...prev, currentWpm]);
     }, 1000);
 
@@ -367,14 +374,14 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
   // Calculate live WPM (aggregate across passages)
   const liveWpm = (() => {
     if (!startTime || gameState !== 'running') return 0;
-    const elapsed = (Date.now() - startTime) / 1000 / 60;
-    if (elapsed < 0.01) return 0;
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    if (elapsedSeconds < 0.6) return 0;
     let correct = 0;
     for (let i = 0; i < typed.length; i++) {
       if (typed[i] === currentPassage[i]) correct++;
     }
     const totalCorrect = accumulatedCorrectRef.current + correct;
-    return Math.round(totalCorrect / 5 / elapsed);
+    return calculateWpm(totalCorrect, elapsedSeconds);
   })();
 
   const liveAccuracy = (() => {
@@ -385,7 +392,37 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       if (typed[i] === currentPassage[i]) correct++;
     }
     const totalCorrect = accumulatedCorrectRef.current + correct;
-    return Math.round((totalCorrect / totalTyped) * 100);
+    return calculateAccuracy(totalCorrect, totalTyped);
+  })();
+
+  // Progress indicators.
+  // For word mode: count already-completed passages plus the number of whole
+  // words typed in the current passage (a word counts the instant its
+  // trailing space is typed).
+  // For time mode: percentage of the configured duration that has elapsed.
+  const wordsCompleted = (() => {
+    if (!isWordMode) return 0;
+    const completedWords = completedPassages.reduce((sum, p) => {
+      return sum + p.text.split(/\s+/).filter(Boolean).length;
+    }, 0);
+    // Count whole words finished in current passage: a word is "finished"
+    // once the user has typed past a space. Avoid false-positives from
+    // partially-typed words.
+    let inCurrent = 0;
+    for (let i = 0; i < typed.length && i < currentPassage.length; i++) {
+      if (currentPassage[i] === ' ') inCurrent++;
+    }
+    return Math.min(currentWordCount || 0, completedWords + inCurrent);
+  })();
+
+  const overallProgressPercent = (() => {
+    if (isWordMode) {
+      if (!currentWordCount || currentWordCount <= 0) return 0;
+      return Math.min(100, (wordsCompleted / currentWordCount) * 100);
+    }
+    if (currentDuration <= 0) return 0;
+    const elapsed = currentDuration - timeLeft;
+    return Math.min(100, Math.max(0, (elapsed / currentDuration) * 100));
   })();
 
   if (result && gameState === 'finished') {
@@ -457,6 +494,15 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
             <div className="text-3xl font-bold text-neon-purple">{liveAccuracy}%</div>
             <div className="text-xs text-gray-500 uppercase tracking-wider">accuracy</div>
           </div>
+          {isWordMode && currentWordCount && (
+            <div className="text-center">
+              <div className="text-3xl font-bold text-neon-yellow">
+                {wordsCompleted}
+                <span className="text-gray-500 text-xl font-normal"> / {currentWordCount}</span>
+              </div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider">words</div>
+            </div>
+          )}
         </div>
 
         {/* Duration selector (time mode only) */}
@@ -466,7 +512,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
               <button
                 key={d}
                 onClick={() => resetGame({ newDuration: d })}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                disabled={gameState === 'running'}
+                aria-disabled={gameState === 'running'}
+                title={gameState === 'running' ? 'Finish or restart to change duration' : undefined}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   currentDuration === d
                     ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'
                     : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
@@ -483,7 +532,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
               <button
                 key={wc}
                 onClick={() => resetGame({ newWordCount: wc })}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                disabled={gameState === 'running'}
+                aria-disabled={gameState === 'running'}
+                title={gameState === 'running' ? 'Finish or restart to change word count' : undefined}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   currentWordCount === wc
                     ? 'bg-neon-blue/20 text-neon-blue border border-neon-blue/30'
                     : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
@@ -586,10 +638,25 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
         )}
       </div>
 
-      {/* Progress Bar (per-passage) */}
-      <div className="mt-4 h-1 bg-gray-800 rounded-full overflow-hidden">
+      {/* Overall progress bar — time-based for time mode, word-based for word mode */}
+      <div
+        className="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(overallProgressPercent)}
+        aria-label={isWordMode ? 'Words completed' : 'Time elapsed'}
+      >
         <div
-          className="h-full bg-gradient-to-r from-neon-blue to-neon-purple transition-all duration-100"
+          className="h-full bg-gradient-to-r from-neon-blue via-neon-purple to-neon-pink transition-all duration-200 ease-out"
+          style={{ width: `${overallProgressPercent}%` }}
+        />
+      </div>
+
+      {/* Per-passage fine-grained progress (visual only, thinner) */}
+      <div className="mt-1 h-0.5 bg-gray-800/70 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-neon-blue/40 transition-all duration-100"
           style={{ width: `${(typed.length / currentPassage.length) * 100}%` }}
         />
       </div>
