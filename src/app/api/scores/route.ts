@@ -40,14 +40,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid anonymousId format' }, { status: 400 });
     }
 
-    // Validate WPM (0-300)
-    if (typeof wpm !== 'number' || wpm < 0 || wpm > 300) {
-      return NextResponse.json({ error: 'WPM must be a number between 0 and 300' }, { status: 400 });
+    // Determine game mode early for use in validation
+    const validWordModes = ['words-10', 'words-25', 'words-50', 'words-100'];
+    const isWordMode = validWordModes.includes(gameMode);
+
+    // Validate WPM (0-300 for time mode, 0-500 for word mode to handle burst typing on short tests)
+    const wpmCap = isWordMode ? 500 : 300;
+    if (typeof wpm !== 'number' || wpm < 0 || wpm > wpmCap) {
+      return NextResponse.json({ error: `WPM must be a number between 0 and ${wpmCap}` }, { status: 400 });
     }
 
-    // Validate raw WPM (0-300)
-    if (typeof rawWpm !== 'number' || rawWpm < 0 || rawWpm > 300) {
-      return NextResponse.json({ error: 'Raw WPM must be a number between 0 and 300' }, { status: 400 });
+    // Validate raw WPM (0-300 for time mode, 0-500 for word mode)
+    if (typeof rawWpm !== 'number' || rawWpm < 0 || rawWpm > wpmCap) {
+      return NextResponse.json({ error: `Raw WPM must be a number between 0 and ${wpmCap}` }, { status: 400 });
     }
 
     // Validate accuracy (0-100)
@@ -56,13 +61,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate game mode and duration
-    const validWordModes = ['words-10', 'words-25', 'words-50', 'words-100'];
-    const isWordMode = validWordModes.includes(gameMode);
     if (!isWordMode && ![15, 30, 60, 120].includes(durationSeconds)) {
       return NextResponse.json({ error: 'Duration must be 15, 30, 60, or 120 seconds for timed mode' }, { status: 400 });
     }
-    if (isWordMode && (typeof durationSeconds !== 'number' || durationSeconds < 1 || durationSeconds > 3600)) {
-      return NextResponse.json({ error: 'Duration must be between 1 and 3600 seconds for word mode' }, { status: 400 });
+    if (isWordMode && (typeof durationSeconds !== 'number' || durationSeconds < 0.1 || durationSeconds > 3600)) {
+      return NextResponse.json({ error: 'Duration must be between 0.1 and 3600 seconds for word mode' }, { status: 400 });
     }
 
     // Validate character counts

@@ -46,7 +46,7 @@
   background: #4b5563;
 }
 
-/* Cursor blink animation */
+/* Cursor blink animation (legacy) */
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
@@ -54,4 +54,15 @@
 
 .cursor-blink {
   animation: blink 1s infinite;
+}
+
+/* Smooth caret blink animation */
+@keyframes caret-blink {
+  0%, 40% { opacity: 1; }
+  50%, 90% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.caret-blink {
+  animation: caret-blink 1s ease-in-out infinite;
 }

@@ -66,6 +66,9 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const currentCharRef = useRef<HTMLSpanElement>(null);
   const textDisplayRef = useRef<HTMLDivElement>(null);
+  const caretRef = useRef<HTMLDivElement>(null);
+  const caretBlinkTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [caretBlink, setCaretBlink] = useState(false);
 
   // Refs for accumulated stats across passages
   const accumulatedCorrectRef = useRef(0);
@@ -131,7 +134,10 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
       setCurrentWordCount(wc);
     }
     if (isWordMode) {
-      setCurrentPassage(generateWordPassage(wc || 25));
+      // Only regenerate word passage when explicitly requesting new text or when word count changes
+      if (options?.newPassage || options?.newWordCount !== undefined) {
+        setCurrentPassage(generateWordPassage(wc || 25));
+      }
     } else if (options?.newPassage || options?.newDuration !== undefined) {
       setCurrentPassage(getRandomPassage(currentPassage));
     }
@@ -237,12 +243,29 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
     inputRef.current?.focus();
   }, [gameState]);
 
-  // Auto-scroll to current typing position
+  // Auto-scroll to current typing position & update caret position
   useEffect(() => {
     if (currentCharRef.current) {
       currentCharRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [typed]);
+    // Update caret position
+    if (currentCharRef.current && textDisplayRef.current && caretRef.current) {
+      const charRect = currentCharRef.current.getBoundingClientRect();
+      const containerRect = textDisplayRef.current.getBoundingClientRect();
+      caretRef.current.style.left = `${charRect.left - containerRect.left}px`;
+      caretRef.current.style.top = `${charRect.top - containerRect.top}px`;
+      caretRef.current.style.height = `${charRect.height}px`;
+    }
+    // Reset blink: caret is solid while typing, blinks after 500ms pause
+    setCaretBlink(false);
+    if (caretBlinkTimeout.current) clearTimeout(caretBlinkTimeout.current);
+    caretBlinkTimeout.current = setTimeout(() => {
+      setCaretBlink(true);
+    }, 500);
+    return () => {
+      if (caretBlinkTimeout.current) clearTimeout(caretBlinkTimeout.current);
+    };
+  }, [typed, currentPassage, completedPassages]);
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (gameState === 'finished') return;
@@ -450,7 +473,7 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
                 ? 'text-neon-green'
                 : 'text-red-500 bg-red-500/10';
             } else if (isCursor) {
-              className = 'text-gray-300 border-l-2 border-neon-blue cursor-blink';
+              className = 'text-gray-300';
             }
             return (
               <span
@@ -463,6 +486,13 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
             );
           })}
         </div>
+
+        {/* Smooth sliding caret */}
+        <div
+          ref={caretRef}
+          className={`absolute w-0.5 bg-neon-blue rounded-full pointer-events-none transition-all duration-100 ease-out ${caretBlink ? 'caret-blink' : ''}`}
+          style={{ left: 0, top: 0, height: '1.5em' }}
+        />
 
         {/* Hidden Input */}
         <textarea
