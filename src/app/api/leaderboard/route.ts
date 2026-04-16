@@ -3,6 +3,56 @@ import { query, ensureMigrations, isConnectionError, sanitizeErrorMessage } from
 import { checkRateLimit } from '@/lib/rate-limit';
 import { getClientIp } from '@/lib/request-utils';
 
+// In-memory cache for leaderboard query results.
+// Keyed by the filter parameter (duration or word-mode string), TTL-based.
+// We cache the raw rows (including player_id) so we can compute per-request
+// is_current_user highlighting after cache retrieval.
+interface CachedLeaderboardRow {
+  id: number;
+  player_id: number;
+  username: string;
+  wpm: number;
+  raw_wpm: number;
+  accuracy: number;
+  duration_seconds: number;
+  correct_chars: number;
+  incorrect_chars: number;
+  created_at: string;
+  game_mode: string;
+}
+
+interface CacheEntry {
+  rows: CachedLeaderboardRow[];
+  expiresAt: number;
+}
+
+const CACHE_TTL_MS = 30_000;
+const CACHE_MAX_AGE_SECONDS = 15;
+const CACHE_SWR_SECONDS = 30;
+
+const leaderboardCache = new Map<string, CacheEntry>();
+
+function getCachedRows(key: string): CachedLeaderboardRow[] | null {
+  const entry = leaderboardCache.get(key);
+  if (!entry) return null;
+  if (Date.now() >= entry.expiresAt) {
+    leaderboardCache.delete(key);
+    return null;
+  }
+  return entry.rows;
+}
+
+function setCachedRows(key: string, rows: CachedLeaderboardRow[]): void {
+  leaderboardCache.set(key, { rows, expiresAt: Date.now() + CACHE_TTL_MS });
+  // Opportunistic cleanup to prevent unbounded growth.
+  if (leaderboardCache.size > 32) {
+    const now = Date.now();
+    leaderboardCache.forEach((v, k) => {
+      if (v.expiresAt <= now) leaderboardCache.delete(k);
+    });
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const ip = getClientIp(request);
@@ -38,6 +88,33 @@ export async function GET(request: NextRequest) {
     // Support filtering by duration (timed modes) or game_mode (word modes)
     const validWordModes = ['words-10', 'words-25', 'words-50', 'words-100'];
     const isWordModeFilter = durationParam && validWordModes.includes(durationParam);
+
+    // Build a cache key from the filter parameter. 'all' is the catch-all for
+    // requests that don't match any recognized filter (falls through to the
+    // unfiltered query). is_current_user is NOT part of the key \u2014 it's computed
+    // per-request after cache retrieval.
+    let cacheKey: string;
+    if (isWordModeFilter) {
+      cacheKey = `mode:${durationParam}`;
+    } else if (durationParam && [15, 30, 60, 120].includes(Number(durationParam))) {
+      cacheKey = `duration:${Number(durationParam)}`;
+    } else {
+      cacheKey = 'all';
+    }
+
+    const cacheHeaders = {
+      'Cache-Control': `public, max-age=${CACHE_MAX_AGE_SECONDS}, stale-while-revalidate=${CACHE_SWR_SECONDS}`,
+    };
+
+    const cached = getCachedRows(cacheKey);
+    if (cached) {
+      const leaderboard = cached.map((row) => {
+        const isCurrentUser = currentPlayerId !== null && row.player_id === currentPlayerId;
+        const { player_id: _removed, ...rest } = row;
+        return { ...rest, is_current_user: isCurrentUser };
+      });
+      return NextResponse.json({ leaderboard }, { headers: cacheHeaders });
+    }
 
     if (isWordModeFilter) {
       sql = `
@@ -98,15 +175,20 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await query(sql, params);
+    const rows = result.rows as CachedLeaderboardRow[];
 
-    const leaderboard = result.rows
-      .map((row: { player_id: number; [key: string]: string | number }) => {
-        const isCurrentUser = currentPlayerId !== null && row.player_id === currentPlayerId;
-        const { player_id: _removed, ...rest } = row;
-        return { ...rest, is_current_user: isCurrentUser };
-      });
+    // Populate the cache with the raw rows so subsequent requests within the
+    // TTL window can skip the database entirely while still computing the
+    // per-user is_current_user flag correctly.
+    setCachedRows(cacheKey, rows);
 
-    return NextResponse.json({ leaderboard });
+    const leaderboard = rows.map((row) => {
+      const isCurrentUser = currentPlayerId !== null && row.player_id === currentPlayerId;
+      const { player_id: _removed, ...rest } = row;
+      return { ...rest, is_current_user: isCurrentUser };
+    });
+
+    return NextResponse.json({ leaderboard }, { headers: cacheHeaders });
   } catch (error) {
     console.error('Error fetching leaderboard:', sanitizeErrorMessage(error));
     if (isConnectionError(error)) {

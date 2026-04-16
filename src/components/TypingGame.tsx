@@ -11,6 +11,7 @@ interface TypingGameProps {
   mode?: 'time' | 'words';
   duration: number;
   wordCount?: number;
+  initialPracticeMode?: boolean;
 }
 
 type GameState = 'waiting' | 'running' | 'finished';
@@ -47,7 +48,7 @@ function generateWordPassage(count: number): string {
   return selected.join(' ');
 }
 
-export function TypingGame({ mode = 'time', duration, wordCount }: TypingGameProps) {
+export function TypingGame({ mode = 'time', duration, wordCount, initialPracticeMode = false }: TypingGameProps) {
   const isWordMode = mode === 'words';
   const [currentPassage, setCurrentPassage] = useState(() =>
     isWordMode && wordCount ? generateWordPassage(wordCount) : getRandomPassage()
@@ -62,12 +63,15 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
   const [currentWordCount, setCurrentWordCount] = useState(wordCount);
   const [completedPassages, setCompletedPassages] = useState<PassageRecord[]>([]);
   const [wpmSamples, setWpmSamples] = useState<number[]>([]);
+  const [practiceMode, setPracticeMode] = useState(initialPracticeMode);
+  const [pasteBlocked, setPasteBlocked] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const currentCharRef = useRef<HTMLSpanElement>(null);
   const textDisplayRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLDivElement>(null);
   const caretBlinkTimeout = useRef<NodeJS.Timeout | null>(null);
+  const pasteFlashTimeout = useRef<NodeJS.Timeout | null>(null);
   const [caretBlink, setCaretBlink] = useState(false);
 
   // Refs for accumulated stats across passages
@@ -116,9 +120,10 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
       gameMode: isWordMode ? 'words' : 'time',
       wordCount: isWordMode ? currentWordCount : undefined,
       completionTime: isWordMode ? Math.round(completionTimeSeconds * 10) / 10 : undefined,
+      practiceMode,
     });
     setGameState('finished');
-  }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples, startTime, isWordMode, currentWordCount]);
+  }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples, startTime, isWordMode, currentWordCount, practiceMode]);
 
   const resetGame = useCallback((options?: { newPassage?: boolean; newDuration?: number; newWordCount?: number }) => {
     if (timerRef.current) {
@@ -161,21 +166,20 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
     setStartTime(now);
 
     if (isWordMode) {
-      // Count up timer for word mode
+      // Count up timer for word mode, derived from wall-clock elapsed time
       setElapsedTime(0);
       timerRef.current = setInterval(() => {
-        setElapsedTime(Math.round((Date.now() - now) / 1000));
-      }, 1000);
+        setElapsedTime(Math.floor((Date.now() - now) / 1000));
+      }, 200);
     } else {
+      // Countdown timer derived from wall-clock elapsed time to avoid drift
       setTimeLeft(currentDuration);
       timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+        const elapsedSec = (Date.now() - now) / 1000;
+        const remaining = Math.max(0, currentDuration - elapsedSec);
+        // Round up so the displayed countdown only hits 0 once the real time has elapsed
+        setTimeLeft(Math.ceil(remaining));
+      }, 200);
     }
   }, [currentDuration, isWordMode]);
 
@@ -248,12 +252,16 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
     if (currentCharRef.current) {
       currentCharRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-    // Update caret position
+    // Update caret position. The caret is absolutely positioned inside the scrollable
+    // container, so we need to compensate for the container's scroll offset to keep
+    // the caret aligned with the current character when the text has scrolled.
     if (currentCharRef.current && textDisplayRef.current && caretRef.current) {
       const charRect = currentCharRef.current.getBoundingClientRect();
       const containerRect = textDisplayRef.current.getBoundingClientRect();
-      caretRef.current.style.left = `${charRect.left - containerRect.left}px`;
-      caretRef.current.style.top = `${charRect.top - containerRect.top}px`;
+      const scrollTop = textDisplayRef.current.scrollTop;
+      const scrollLeft = textDisplayRef.current.scrollLeft;
+      caretRef.current.style.left = `${charRect.left - containerRect.left + scrollLeft}px`;
+      caretRef.current.style.top = `${charRect.top - containerRect.top + scrollTop}px`;
       caretRef.current.style.height = `${charRect.height}px`;
     }
     // Reset blink: caret is solid while typing, blinks after 500ms pause
@@ -266,6 +274,24 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
       if (caretBlinkTimeout.current) clearTimeout(caretBlinkTimeout.current);
     };
   }, [typed, currentPassage, completedPassages]);
+
+  const handlePasteOrDrop = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement> | React.DragEvent<HTMLTextAreaElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setPasteBlocked(true);
+      if (pasteFlashTimeout.current) clearTimeout(pasteFlashTimeout.current);
+      pasteFlashTimeout.current = setTimeout(() => setPasteBlocked(false), 1800);
+    },
+    []
+  );
+
+  // Cleanup paste flash timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (pasteFlashTimeout.current) clearTimeout(pasteFlashTimeout.current);
+    };
+  }, []);
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (gameState === 'finished') return;
@@ -374,6 +400,44 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
 
   return (
     <div className="max-w-4xl mx-auto animate-fade-in">
+      {/* Practice Mode Bar */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={practiceMode}
+            aria-label="Toggle practice mode"
+            onClick={() => {
+              if (gameState === 'waiting') {
+                setPracticeMode((v) => !v);
+              }
+            }}
+            disabled={gameState !== 'waiting'}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-neon-yellow/50 disabled:opacity-60 disabled:cursor-not-allowed ${
+              practiceMode ? 'bg-neon-yellow/40 border border-neon-yellow/60' : 'bg-gray-800 border border-gray-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                practiceMode ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+          <div className="flex flex-col leading-tight">
+            <span className="text-xs uppercase tracking-wider text-gray-400">Practice Mode</span>
+            <span className="text-[10px] text-gray-500">
+              {practiceMode ? 'Scores will NOT be saved' : 'Scores save to leaderboard'}
+            </span>
+          </div>
+        </div>
+        {practiceMode && (
+          <div className="px-3 py-1 bg-neon-yellow/10 border border-neon-yellow/40 rounded-full text-neon-yellow text-xs font-semibold uppercase tracking-wider">
+            Practice Mode
+          </div>
+        )}
+      </div>
+
       {/* Stats Bar */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-6">
@@ -499,6 +563,9 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
           ref={inputRef}
           value={typed}
           onChange={handleInput}
+          onPaste={handlePasteOrDrop}
+          onDrop={handlePasteOrDrop}
+          onDragOver={(e) => e.preventDefault()}
           className="absolute inset-0 w-full h-full opacity-0 cursor-text resize-none"
           autoComplete="off"
           autoCorrect="off"
@@ -506,6 +573,17 @@ export function TypingGame({ mode = 'time', duration, wordCount }: TypingGamePro
           spellCheck={false}
           aria-label="Type the displayed text here"
         />
+
+        {/* Paste/drop blocked toast */}
+        {pasteBlocked && (
+          <div
+            className="absolute top-2 right-2 bg-red-500/90 text-white text-xs font-medium px-3 py-1.5 rounded-lg shadow-lg pointer-events-none animate-fade-in z-20"
+            role="status"
+            aria-live="polite"
+          >
+            Paste &amp; drop disabled — keyboard only
+          </div>
+        )}
       </div>
 
       {/* Progress Bar (per-passage) */}
