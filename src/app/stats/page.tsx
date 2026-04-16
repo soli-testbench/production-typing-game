@@ -73,7 +73,7 @@ function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
   });
 
   const chronological = [...filteredScores].reverse();
-  const trendGames = chronological.slice(-Math.max(20, chronological.length));
+  const trendGames = chronological.slice(-20);
   const samples = trendGames.map((s) => s.wpm);
   const accuracySamples = trendGames.map((s) => Number(s.accuracy));
 
