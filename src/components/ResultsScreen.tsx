@@ -249,19 +249,36 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   const [retryCount, setRetryCount] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Tracks whether the auto-save path was taken (either the user provided a
+  // name, or they dismissed the modal and we saved as "Anonymous"). When
+  // true, the explicit "Save Score to Leaderboard" button is hidden so we
+  // cannot accidentally submit the same score twice.
+  const [autoSaveInitiated, setAutoSaveInitiated] = useState(false);
   const maxRetries = 3;
+
+  // Helper: cancel any pending retry timeout. Called before kicking off a
+  // new manual save or on unmount so we never have two concurrent save
+  // attempts racing against each other.
+  const cancelPendingRetry = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+  }, []);
 
   // Cleanup retry timeout on unmount
   useEffect(() => {
     return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
+      cancelPendingRetry();
     };
-  }, []);
+  }, [cancelPendingRetry]);
 
   const saveScore = useCallback(async (attempt = 0, nameOverride?: string) => {
     if (saved) return;
+    // Any new save attempt (fresh or retry) supersedes any pending retry
+    // timeout. This prevents a retry from firing concurrently with a manual
+    // click.
+    cancelPendingRetry();
     if (attempt === 0) {
       if (saveAttemptedRef.current) return;
       saveAttemptedRef.current = true;
@@ -360,13 +377,16 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     } finally {
       setSaving(false);
     }
-  }, [playerName, anonymousId, result, saved, maxRetries]);
+  }, [playerName, anonymousId, result, saved, maxRetries, cancelPendingRetry]);
 
   // Auto-save when name is already set on mount, or auto-show modal if no name.
   // Skip entirely in practice mode — scores should not be saved.
   useEffect(() => {
     if (result.practiceMode) return;
     if (isNameSet && !saved && !saveAttemptedRef.current) {
+      // Mark the auto-save path as taken so the manual Save button is
+      // never rendered for users who already had their name set on mount.
+      setAutoSaveInitiated(true);
       saveScore();
     } else if (!isNameSet && !autoModalShownRef.current) {
       autoModalShownRef.current = true;
@@ -381,13 +401,20 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
   const handleModalDismiss = useCallback(() => {
     setShowNameModal(false);
     if (!isNameSet && !saved && !saveAttemptedRef.current) {
+      // Mark the auto-save path as taken so the manual Save button does not
+      // render — preventing a duplicate submission with a different name.
+      setAutoSaveInitiated(true);
       saveScore(0, 'Anonymous');
     }
   }, [isNameSet, saved, saveScore]);
 
-  // Keyboard shortcuts for results screen
+  // Keyboard shortcuts for results screen. Tab/Esc are explicitly ignored
+  // while the name-entry modal is open so they don't race with the modal's
+  // own focus-trap / dismiss handlers even if event propagation leaks
+  // through (e.g. React synthetic events vs. native listeners).
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (showNameModal) return;
       if (e.key === 'Tab') {
         e.preventDefault();
         onRetry();
@@ -398,12 +425,19 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onRetry, onNewTest]);
+  }, [onRetry, onNewTest, showNameModal]);
 
   const handleSaveClick = () => {
+    // Guard against double-clicks / races: if a save is already in flight
+    // (either actively saving or waiting to retry) ignore the click.
+    if (saving || retrying || saved) return;
     if (!isNameSet) {
       setShowNameModal(true);
     } else {
+      // Ensure any queued retry from a previous failure is cleared so we
+      // don't end up with two concurrent requests.
+      cancelPendingRetry();
+      saveAttemptedRef.current = false;
       saveScore();
     }
   };
@@ -521,8 +555,12 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
         </div>
       </div>
 
-      {/* Save Score — hidden in practice mode since no score is saved */}
-      {!result.practiceMode && !saved && (
+      {/* Save Score — hidden in practice mode since no score is saved, and
+          also hidden once the auto-save path has been taken (anonymous save
+          after modal dismiss, or auto-save with a known name). This prevents
+          a user from triggering a duplicate save after the score has already
+          been submitted in the background. */}
+      {!result.practiceMode && !saved && !autoSaveInitiated && (
         <div className="text-center mb-6">
           <button
             onClick={handleSaveClick}
@@ -532,6 +570,16 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
             {saveButtonLabel}
           </button>
           {saveError && <p className="text-red-400 text-sm mt-2">{saveError}</p>}
+        </div>
+      )}
+      {!result.practiceMode && !saved && autoSaveInitiated && (saving || retrying) && (
+        <div className="text-center mb-6">
+          <p className="text-gray-400 text-sm">{saveButtonLabel}</p>
+        </div>
+      )}
+      {!result.practiceMode && !saved && autoSaveInitiated && !saving && !retrying && saveError && (
+        <div className="text-center mb-6">
+          <p className="text-red-400 text-sm">{saveError}</p>
         </div>
       )}
       {!result.practiceMode && saved && (
@@ -569,6 +617,9 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
           onClose={handleModalDismiss}
           onSaved={() => {
             setShowNameModal(false);
+            // Name was just set — kick off the auto-save path so the
+            // button is also hidden in this branch.
+            setAutoSaveInitiated(true);
             saveScore();
           }}
         />
