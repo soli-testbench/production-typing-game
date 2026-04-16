@@ -88,6 +88,110 @@ export async function GET(request: NextRequest) {
     // Support filtering by duration (timed modes) or game_mode (word modes)
     const validWordModes = ['words-10', 'words-25', 'words-50', 'words-100'];
     const isWordModeFilter = durationParam && validWordModes.includes(durationParam);
+    const isTimedFilter = durationParam && [15, 30, 60, 120].includes(Number(durationParam));
+
+    // Resolve the current player's best score and rank for the selected
+    // filter. This is returned alongside the leaderboard so the UI can show
+    // "Your rank: #N — X WPM" when the player falls outside the top 100.
+    // Rank is defined as the number of *distinct* players whose best WPM for
+    // the filter is strictly greater than this player's best, plus one.
+    interface CurrentPlayerRank {
+      rank: number;
+      wpm: number;
+      accuracy: number;
+      durationSeconds: number;
+      gameMode: string;
+    }
+    let currentPlayerRank: CurrentPlayerRank | null = null;
+
+    if (currentPlayerId !== null) {
+      let bestSql: string;
+      let bestParams: (string | number)[];
+      let rankSql: string;
+      let rankParams: (string | number)[];
+
+      if (isWordModeFilter) {
+        bestSql = `
+          SELECT wpm, accuracy, duration_seconds, game_mode
+          FROM game_results
+          WHERE player_id = $1 AND game_mode = $2
+          ORDER BY wpm DESC, accuracy DESC
+          LIMIT 1
+        `;
+        bestParams = [currentPlayerId, durationParam as string];
+      } else if (isTimedFilter) {
+        bestSql = `
+          SELECT wpm, accuracy, duration_seconds, game_mode
+          FROM game_results
+          WHERE player_id = $1 AND duration_seconds = $2 AND game_mode = 'classic'
+          ORDER BY wpm DESC, accuracy DESC
+          LIMIT 1
+        `;
+        bestParams = [currentPlayerId, Number(durationParam)];
+      } else {
+        bestSql = `
+          SELECT wpm, accuracy, duration_seconds, game_mode
+          FROM game_results
+          WHERE player_id = $1
+          ORDER BY wpm DESC, accuracy DESC
+          LIMIT 1
+        `;
+        bestParams = [currentPlayerId];
+      }
+
+      const bestResult = await query(bestSql, bestParams);
+      if (bestResult.rows.length > 0) {
+        const best = bestResult.rows[0];
+        const bestWpm = Number(best.wpm);
+
+        if (isWordModeFilter) {
+          rankSql = `
+            SELECT COUNT(*)::int AS rank_count
+            FROM (
+              SELECT player_id
+              FROM game_results
+              WHERE game_mode = $1
+              GROUP BY player_id
+              HAVING MAX(wpm) > $2
+            ) higher
+          `;
+          rankParams = [durationParam as string, bestWpm];
+        } else if (isTimedFilter) {
+          rankSql = `
+            SELECT COUNT(*)::int AS rank_count
+            FROM (
+              SELECT player_id
+              FROM game_results
+              WHERE duration_seconds = $1 AND game_mode = 'classic'
+              GROUP BY player_id
+              HAVING MAX(wpm) > $2
+            ) higher
+          `;
+          rankParams = [Number(durationParam), bestWpm];
+        } else {
+          rankSql = `
+            SELECT COUNT(*)::int AS rank_count
+            FROM (
+              SELECT player_id
+              FROM game_results
+              GROUP BY player_id
+              HAVING MAX(wpm) > $1
+            ) higher
+          `;
+          rankParams = [bestWpm];
+        }
+
+        const rankResult = await query(rankSql, rankParams);
+        const rankCount = Number(rankResult.rows[0]?.rank_count ?? 0);
+        currentPlayerRank = {
+          rank: rankCount + 1,
+          wpm: bestWpm,
+          accuracy: Number(best.accuracy),
+          durationSeconds: Number(best.duration_seconds),
+          gameMode: best.game_mode,
+        };
+      }
+    }
 
     // Build a cache key from the filter parameter. 'all' is the catch-all for
     // requests that don't match any recognized filter (falls through to the
@@ -113,7 +217,10 @@ export async function GET(request: NextRequest) {
         const { player_id: _removed, ...rest } = row;
         return { ...rest, is_current_user: isCurrentUser };
       });
-      return NextResponse.json({ leaderboard }, { headers: cacheHeaders });
+      return NextResponse.json(
+        { leaderboard, currentPlayerRank },
+        { headers: cacheHeaders }
+      );
     }
 
     if (isWordModeFilter) {
@@ -188,7 +295,10 @@ export async function GET(request: NextRequest) {
       return { ...rest, is_current_user: isCurrentUser };
     });
 
-    return NextResponse.json({ leaderboard }, { headers: cacheHeaders });
+    return NextResponse.json(
+      { leaderboard, currentPlayerRank },
+      { headers: cacheHeaders }
+    );
   } catch (error) {
     console.error('Error fetching leaderboard:', sanitizeErrorMessage(error));
     if (isConnectionError(error)) {

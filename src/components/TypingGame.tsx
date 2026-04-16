@@ -3,8 +3,44 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { passages } from '@/data/passages';
 import { ResultsScreen } from '@/components/ResultsScreen';
-import { GameResult } from '@/types/game';
+import { GameResult, TroubleCharacter } from '@/types/game';
 import { calculateWpm, calculateRawWpm, calculateAccuracy } from '@/lib/typing-utils';
+
+const TROUBLE_CHARACTERS_LIMIT = 5;
+
+/**
+ * Convert the raw per-expected-character mistype map accumulated during a
+ * game into the sorted `TroubleCharacter[]` array exposed on `GameResult`.
+ * Returns the top N most-mistyped expected characters, each annotated with
+ * the incorrect character most frequently typed in its place.
+ */
+function buildTroubleCharacters(
+  errorMap: Map<string, Map<string, number>>,
+  limit: number = TROUBLE_CHARACTERS_LIMIT
+): TroubleCharacter[] {
+  const entries: TroubleCharacter[] = [];
+  errorMap.forEach((actualCounts, expected) => {
+    let totalCount = 0;
+    let topActual = '';
+    let topActualCount = 0;
+    actualCounts.forEach((count, actual) => {
+      totalCount += count;
+      if (count > topActualCount) {
+        topActualCount = count;
+        topActual = actual;
+      }
+    });
+    if (totalCount === 0) return;
+    entries.push({
+      expected,
+      count: totalCount,
+      mostCommonIncorrect: topActual,
+      mostCommonIncorrectCount: topActualCount,
+    });
+  });
+  entries.sort((a, b) => b.count - a.count);
+  return entries.slice(0, limit);
+}
 
 export type { GameResult } from '@/types/game';
 
@@ -27,6 +63,13 @@ function getRandomPassage(exclude?: string): string {
   return available[Math.floor(Math.random() * available.length)];
 }
 
+// Tests with 25 or fewer words feel repetitive if any word appears twice, and
+// the unique-word pool (built from all passages) is large enough that a
+// Set-based rejection sample has a negligible performance cost at these sizes.
+// Above this threshold, we fall back to the cheap consecutive-duplicate check
+// so we don't blow up memory / CPU for very large word counts.
+const UNIQUE_WORDS_THRESHOLD = 25;
+
 function generateWordPassage(count: number): string {
   const allWords: string[] = [];
   for (const p of passages) {
@@ -37,6 +80,37 @@ function generateWordPassage(count: number): string {
       if (cleaned.length > 1) allWords.push(cleaned);
     }
   }
+
+  // For small counts, enforce full uniqueness using a partial Fisher-Yates
+  // shuffle over the unique word pool. This produces a random (not sorted)
+  // selection with no duplicates, as long as the pool is large enough. If
+  // the requested count exceeds the unique pool size (defensive fallback),
+  // we degrade gracefully by filling the remainder with the consecutive-
+  // duplicate-prevention strategy used for larger counts.
+  if (count <= UNIQUE_WORDS_THRESHOLD) {
+    const uniquePool = Array.from(new Set(allWords));
+    const pickCount = Math.min(count, uniquePool.length);
+    // Partial Fisher-Yates: O(pickCount) swaps, unbiased sample.
+    for (let i = 0; i < pickCount; i++) {
+      const j = i + Math.floor(Math.random() * (uniquePool.length - i));
+      const tmp = uniquePool[i];
+      uniquePool[i] = uniquePool[j];
+      uniquePool[j] = tmp;
+    }
+    const selected: string[] = uniquePool.slice(0, pickCount);
+    // If the unique pool was somehow smaller than requested, top up with the
+    // legacy non-consecutive-duplicate strategy so the passage is still the
+    // expected length.
+    while (selected.length < count) {
+      let word: string;
+      do {
+        word = allWords[Math.floor(Math.random() * allWords.length)];
+      } while (selected.length > 0 && word === selected[selected.length - 1]);
+      selected.push(word);
+    }
+    return selected.join(' ');
+  }
+
   const selected: string[] = [];
   for (let i = 0; i < count; i++) {
     let word: string;
@@ -80,6 +154,41 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
   const accumulatedIncorrectRef = useRef(0);
   const accumulatedTotalRef = useRef(0);
 
+  // Per-expected-character mistype tracking for the Trouble Characters
+  // section on the results screen. Keyed by expected character -> (actual
+  // character typed -> count). Accumulates across chained passages in time
+  // mode. Reset on resetGame() and between chained passages when the textarea
+  // is cleared so we avoid double-counting.
+  const errorMapRef = useRef<Map<string, Map<string, number>>>(new Map());
+  // Length of the last-observed `typed` value. Only *forward* input (length
+  // increased) records new errors; backspaces do not decrement the ref so a
+  // mistype that was corrected is still credited as an error (the user's
+  // finger still went to the wrong key first).
+  const prevTypedLengthRef = useRef(0);
+
+  const recordErrorsForForwardInput = useCallback(
+    (value: string) => {
+      const prevLen = prevTypedLengthRef.current;
+      if (value.length > prevLen) {
+        const upper = Math.min(value.length, currentPassage.length);
+        for (let i = prevLen; i < upper; i++) {
+          const expected = currentPassage[i];
+          const actual = value[i];
+          if (actual !== expected) {
+            let inner = errorMapRef.current.get(expected);
+            if (!inner) {
+              inner = new Map<string, number>();
+              errorMapRef.current.set(expected, inner);
+            }
+            inner.set(actual, (inner.get(actual) ?? 0) + 1);
+          }
+        }
+      }
+      prevTypedLengthRef.current = value.length;
+    },
+    [currentPassage]
+  );
+
   const calculateAggregateStats = useCallback((overrideElapsedSeconds?: number) => {
     let currentCorrect = 0;
     let currentIncorrect = 0;
@@ -121,6 +230,7 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       wordCount: isWordMode ? currentWordCount : undefined,
       completionTime: isWordMode ? Math.round(completionTimeSeconds * 10) / 10 : undefined,
       practiceMode,
+      troubleCharacters: buildTroubleCharacters(errorMapRef.current),
     });
     setGameState('finished');
   }, [calculateAggregateStats, currentDuration, currentPassage, completedPassages, wpmSamples, startTime, isWordMode, currentWordCount, practiceMode]);
@@ -157,6 +267,8 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
     accumulatedCorrectRef.current = 0;
     accumulatedIncorrectRef.current = 0;
     accumulatedTotalRef.current = 0;
+    errorMapRef.current = new Map();
+    prevTypedLengthRef.current = 0;
     // Restore focus immediately on the next animation frame to avoid a
     // visible flash of the "Click here or start typing to begin..." overlay
     // that would otherwise appear during the ~50ms gap of a setTimeout.
@@ -309,6 +421,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       startGame();
     }
 
+    // Record per-character errors for forward input before we mutate state.
+    // This drives the Trouble Characters section on the results screen.
+    recordErrorsForForwardInput(value);
+
     // Don't allow typing beyond current passage length
     if (value.length <= currentPassage.length) {
       setTyped(value);
@@ -341,6 +457,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
         if (inputRef.current) {
           inputRef.current.value = '';
         }
+        // The textarea is about to be cleared; reset the error-tracking
+        // baseline so the next value we observe (0-length) isn't treated as
+        // a giant backspace.
+        prevTypedLengthRef.current = 0;
         // Use setTimeout to let state updates settle before finishing
         setTimeout(() => finishGame(), 0);
         return;
@@ -360,6 +480,10 @@ export function TypingGame({ mode = 'time', duration, wordCount, initialPractice
       if (inputRef.current) {
         inputRef.current.value = '';
       }
+      // Reset the error-tracking baseline for the new passage — subsequent
+      // forward input should be compared against the new passage starting
+      // at index 0.
+      prevTypedLengthRef.current = 0;
     }
   };
 
