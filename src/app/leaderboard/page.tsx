@@ -15,6 +15,14 @@ interface LeaderboardEntry {
   is_current_user: boolean;
 }
 
+interface CurrentPlayerRank {
+  rank: number;
+  wpm: number;
+  accuracy: number;
+  durationSeconds: number;
+  gameMode: string;
+}
+
 const durations = [
   { label: 'All', value: '' },
   { label: '15s', value: '15' },
@@ -30,6 +38,7 @@ const durations = [
 export default function LeaderboardPage() {
   const { anonymousId } = usePlayer();
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [currentPlayerRank, setCurrentPlayerRank] = useState<CurrentPlayerRank | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedDuration, setSelectedDuration] = useState('');
   const [error, setError] = useState('');
@@ -47,6 +56,7 @@ export default function LeaderboardPage() {
       if (!res.ok) throw new Error('Failed to fetch leaderboard');
       const data = await res.json();
       setEntries(data.leaderboard || []);
+      setCurrentPlayerRank(data.currentPlayerRank ?? null);
     } catch {
       setError('Failed to load leaderboard. Please try again.');
     } finally {
@@ -183,6 +193,28 @@ export default function LeaderboardPage() {
               })}
             </tbody>
           </table>
+
+          {/* Player's own rank when outside the top 100. The API returns
+              currentPlayerRank for the active filter so the player always
+              has a sense of where they stand even if they aren't in the
+              visible slice. If they *are* in the table, the existing
+              "(you)" highlight is sufficient and we skip this banner. */}
+          {currentPlayerRank && !entries.some((e) => e.is_current_user) && (
+            <div className="mt-6 text-center">
+              <div className="inline-block px-6 py-3 bg-neon-blue/10 border border-neon-blue/30 rounded-lg">
+                <span className="text-gray-400 text-sm uppercase tracking-wider mr-2">
+                  Your rank
+                </span>
+                <span className="text-neon-blue font-bold text-lg">
+                  #{currentPlayerRank.rank}
+                </span>
+                <span className="text-gray-500 mx-2">—</span>
+                <span className="text-neon-green font-bold text-lg">
+                  {currentPlayerRank.wpm} WPM
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
