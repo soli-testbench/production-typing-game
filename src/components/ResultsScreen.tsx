@@ -239,6 +239,7 @@ function PersonalBestBanner({ info }: { info: PersonalBestInfo }) {
 export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps) {
   const { playerName, anonymousId, isNameSet } = usePlayer();
   const [showNameModal, setShowNameModal] = useState(false);
+  const autoModalShownRef = useRef(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -281,7 +282,9 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
           wpm: result.wpm,
           rawWpm: result.rawWpm,
           accuracy: result.accuracy,
-          durationSeconds: result.duration,
+          durationSeconds: result.gameMode === 'words' && result.completionTime != null
+            ? result.completionTime
+            : result.duration,
           correctChars: result.correctChars,
           incorrectChars: result.incorrectChars,
         }),
@@ -358,10 +361,13 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
     }
   }, [playerName, anonymousId, result, saved, maxRetries]);
 
-  // Auto-save when name is already set on mount
+  // Auto-save when name is already set on mount, or auto-show modal if no name
   useEffect(() => {
     if (isNameSet && !saved && !saveAttemptedRef.current) {
       saveScore();
+    } else if (!isNameSet && !autoModalShownRef.current) {
+      autoModalShownRef.current = true;
+      setShowNameModal(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
