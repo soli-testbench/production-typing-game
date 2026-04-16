@@ -1,5 +1,12 @@
-import { Pool, PoolClient, QueryResult } from 'pg';
+import { Pool, PoolClient, QueryResult, types } from 'pg';
 import { migrationSQL } from './migrations';
+
+// Parse Postgres NUMERIC values as JS numbers rather than strings so decimal
+// duration_seconds values (e.g. 12.4) round-trip correctly through the API
+// and numeric aggregations on the client work as expected. NUMERIC(5,2) for
+// accuracy and NUMERIC(7,1) for duration_seconds both fit safely within a JS
+// double, so no precision is lost.
+types.setTypeParser(types.builtins.NUMERIC, (val) => parseFloat(val));
 
 let pool: Pool | null = null;
 let migrationsRun = false;

@@ -15,11 +15,30 @@ export const migrationSQL = `
     wpm INTEGER NOT NULL,
     raw_wpm INTEGER NOT NULL,
     accuracy NUMERIC(5,2) NOT NULL,
-    duration_seconds INTEGER NOT NULL,
+    duration_seconds NUMERIC(7,1) NOT NULL,
     correct_chars INTEGER NOT NULL DEFAULT 0,
     incorrect_chars INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   );
+
+  -- Migrate existing integer duration_seconds column to NUMERIC(7,1) so word mode
+  -- completion times can be stored with 1 decimal place of precision (e.g. 12.4s).
+  -- Guarded with information_schema so we only ALTER when the column is still INTEGER.
+  DO $migrate_duration$
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'game_results'
+        AND column_name = 'duration_seconds'
+        AND data_type = 'integer'
+    ) THEN
+      ALTER TABLE game_results
+        ALTER COLUMN duration_seconds TYPE NUMERIC(7,1)
+        USING duration_seconds::NUMERIC(7,1);
+    END IF;
+  END
+  $migrate_duration$;
 
   CREATE INDEX IF NOT EXISTS idx_game_results_wpm ON game_results(wpm DESC);
   CREATE INDEX IF NOT EXISTS idx_game_results_duration ON game_results(duration_seconds);
