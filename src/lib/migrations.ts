@@ -44,6 +44,7 @@ export const migrationSQL = `
   CREATE INDEX IF NOT EXISTS idx_game_results_duration ON game_results(duration_seconds);
   CREATE INDEX IF NOT EXISTS idx_game_results_player_id ON game_results(player_id);
   CREATE INDEX IF NOT EXISTS idx_game_results_created_at ON game_results(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_game_results_player_created ON game_results(player_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_game_results_player_best ON game_results(player_id, wpm DESC, accuracy DESC);
 
   CREATE INDEX IF NOT EXISTS idx_game_results_game_mode_wpm ON game_results(game_mode, wpm DESC);

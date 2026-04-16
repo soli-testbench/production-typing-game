@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
 import { NameEntryModal } from '@/components/NameEntryModal';
-import { GameResult } from '@/types/game';
+import { GameResult, TroubleCharacter } from '@/types/game';
 
 interface PersonalBestInfo {
   isNewBest: boolean;
@@ -192,6 +192,75 @@ function WpmChart({ samples, averageWpm }: { samples: number[]; averageWpm: numb
           </linearGradient>
         </defs>
       </svg>
+    </div>
+  );
+}
+
+function renderPrintableChar(ch: string): string {
+  if (ch === ' ') return 'space';
+  if (ch === '\n') return 'newline';
+  if (ch === '\t') return 'tab';
+  return ch;
+}
+
+function TroubleCharactersSection({ characters }: { characters: TroubleCharacter[] }) {
+  if (!characters || characters.length === 0) {
+    return (
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
+        <h3 className="text-sm text-gray-400 mb-3 text-center uppercase tracking-wider">
+          Trouble Characters
+        </h3>
+        <p className="text-center text-neon-green text-sm font-medium">
+          Perfect accuracy! No errors.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
+      <h3 className="text-sm text-gray-400 mb-3 text-center uppercase tracking-wider">
+        Trouble Characters
+      </h3>
+      <ul className="space-y-2">
+        {characters.map((c) => {
+          const expectedLabel = renderPrintableChar(c.expected);
+          const actualLabel = renderPrintableChar(c.mostCommonIncorrect);
+          const isSingleExpected = expectedLabel.length === 1;
+          const isSingleActual = actualLabel.length === 1;
+          return (
+            <li
+              key={`${c.expected}-${c.mostCommonIncorrect}`}
+              className="flex items-center justify-between text-sm bg-gray-900/60 border border-gray-800 rounded-lg px-3 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 text-xs uppercase tracking-wider">Expected</span>
+                <span
+                  className={`font-mono text-neon-green ${
+                    isSingleExpected ? 'text-lg' : 'text-xs px-1 py-0.5 bg-gray-800 rounded'
+                  }`}
+                >
+                  {expectedLabel}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 text-xs uppercase tracking-wider">Typed</span>
+                <span
+                  className={`font-mono text-red-400 ${
+                    isSingleActual ? 'text-lg' : 'text-xs px-1 py-0.5 bg-gray-800 rounded'
+                  }`}
+                >
+                  {actualLabel}
+                </span>
+              </div>
+              <div className="text-gray-400 text-xs">
+                <span className="text-red-400 font-bold">{c.count}</span>{' '}
+                {c.count === 1 ? 'error' : 'errors'}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -534,6 +603,9 @@ export function ResultsScreen({ result, onRetry, onNewTest }: ResultsScreenProps
 
       {/* WPM Over Time Chart */}
       <WpmChart samples={result.wpmSamples} averageWpm={result.wpm} />
+
+      {/* Trouble Characters (per-character error breakdown) */}
+      <TroubleCharactersSection characters={result.troubleCharacters ?? []} />
 
       {/* Character Stats */}
       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-8">
