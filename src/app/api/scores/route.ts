@@ -310,7 +310,31 @@ export async function GET(request: NextRequest) {
            COALESCE(SUM(gr.duration_seconds), 0)::float AS total_time_seconds,
            COALESCE(SUM(gr.correct_chars + gr.incorrect_chars), 0)::int AS total_characters,
            COALESCE(MAX(gr.wpm), 0)::int AS best_wpm,
-           COALESCE(MAX(gr.accuracy), 0)::float AS best_accuracy
+           COALESCE(MAX(gr.accuracy), 0)::float AS best_accuracy,
+           -- Per-mode best WPM computed server-side across ALL scores
+           -- for this player via conditional aggregation. This avoids
+           -- the client-side calculation bug where personal bests were
+           -- derived from only the current paginated page of scores
+           -- (meaning users with > PAGE_SIZE games saw stale bests).
+           -- NULLs are returned for modes with zero games so the API
+           -- layer can omit them from the response object.
+           MAX(gr.wpm) FILTER (WHERE (gr.game_mode IS NULL OR gr.game_mode = 'classic') AND gr.duration_seconds = 15)::int AS best_wpm_time_15,
+           MAX(gr.wpm) FILTER (WHERE (gr.game_mode IS NULL OR gr.game_mode = 'classic') AND gr.duration_seconds = 30)::int AS best_wpm_time_30,
+           MAX(gr.wpm) FILTER (WHERE (gr.game_mode IS NULL OR gr.game_mode = 'classic') AND gr.duration_seconds = 60)::int AS best_wpm_time_60,
+           MAX(gr.wpm) FILTER (WHERE (gr.game_mode IS NULL OR gr.game_mode = 'classic') AND gr.duration_seconds = 120)::int AS best_wpm_time_120,
+           MAX(gr.wpm) FILTER (WHERE gr.game_mode = 'words-10')::int AS best_wpm_words_10,
+           MAX(gr.wpm) FILTER (WHERE gr.game_mode = 'words-25')::int AS best_wpm_words_25,
+           MAX(gr.wpm) FILTER (WHERE gr.game_mode = 'words-50')::int AS best_wpm_words_50,
+           MAX(gr.wpm) FILTER (WHERE gr.game_mode = 'words-100')::int AS best_wpm_words_100,
+           -- Best (fastest) completion time for each word mode, only
+           -- considering the rows that *achieved* the best WPM for that
+           -- mode is overkill — the meaningful number for the Word Mode
+           -- Bests card is simply the fastest completion ever recorded
+           -- for that mode, which is MIN(duration_seconds).
+           MIN(gr.duration_seconds) FILTER (WHERE gr.game_mode = 'words-10')::float AS best_time_words_10,
+           MIN(gr.duration_seconds) FILTER (WHERE gr.game_mode = 'words-25')::float AS best_time_words_25,
+           MIN(gr.duration_seconds) FILTER (WHERE gr.game_mode = 'words-50')::float AS best_time_words_50,
+           MIN(gr.duration_seconds) FILTER (WHERE gr.game_mode = 'words-100')::float AS best_time_words_100
          FROM game_results gr
          JOIN players p ON gr.player_id = p.id
          WHERE p.anonymous_id = $1`,

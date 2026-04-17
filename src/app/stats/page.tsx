@@ -24,6 +24,13 @@ interface ScoresSummary {
   totalCharacters: number;
   bestWpm: number;
   bestAccuracy: number;
+  // Per-mode best WPM computed server-side across ALL scores. Keys are
+  // '15' | '30' | '60' | '120' for time mode and 'words-10' |
+  // 'words-25' | 'words-50' | 'words-100' for word mode. Only modes
+  // with at least one recorded game appear.
+  bestPerMode?: Record<string, number>;
+  // Fastest completion time in seconds per word-count mode.
+  bestTimePerMode?: Record<string, number>;
 }
 
 const PAGE_SIZE = 50;
@@ -455,19 +462,20 @@ export default function StatsPage() {
     });
   };
 
-  // Personal bests per duration (timed modes). These are still computed
-  // client-side from the current page of scores as a best-effort display.
-  // The primary summary cards above them use the server-side aggregates
-  // (which cover ALL scores, not just the current page).
+  // Personal bests per duration (timed modes). These now come from the
+  // server-side summary aggregates so they are computed over ALL of
+  // the player's scores rather than the current page of 50. When the
+  // server omits a mode (no games recorded for it) we render an em-dash
+  // placeholder.
+  const bestPerMode = summary?.bestPerMode ?? {};
+  const bestTimePerMode = summary?.bestTimePerMode ?? {};
   const durations = [15, 30, 60, 120];
   const personalBests = durations.map((d) => {
-    const filtered = scores.filter((s) => s.duration_seconds === d && (!s.game_mode || s.game_mode === 'classic'));
-    if (filtered.length === 0) return { duration: d, wpm: null };
-    const best = filtered.reduce((a, b) => (a.wpm > b.wpm ? a : b));
-    return { duration: d, wpm: best.wpm };
+    const wpm = bestPerMode[String(d)];
+    return { duration: d, wpm: wpm === undefined ? null : wpm };
   });
 
-  // Personal bests per word count mode
+  // Personal bests per word count mode (server-side)
   const wordModes = [
     { mode: 'words-10', label: '10w' },
     { mode: 'words-25', label: '25w' },
@@ -475,10 +483,14 @@ export default function StatsPage() {
     { mode: 'words-100', label: '100w' },
   ];
   const wordModeBests = wordModes.map(({ mode, label }) => {
-    const filtered = scores.filter((s) => s.game_mode === mode);
-    if (filtered.length === 0) return { mode, label, wpm: null, completionTime: null };
-    const best = filtered.reduce((a, b) => (a.wpm > b.wpm ? a : b));
-    return { mode, label, wpm: best.wpm, completionTime: best.duration_seconds };
+    const wpm = bestPerMode[mode];
+    const completionTime = bestTimePerMode[mode];
+    return {
+      mode,
+      label,
+      wpm: wpm === undefined ? null : wpm,
+      completionTime: completionTime === undefined ? null : completionTime,
+    };
   });
 
   // Summary cards source of truth: server-side aggregates computed over
@@ -676,7 +688,9 @@ export default function StatsPage() {
                   {wb.wpm !== null ? wb.wpm : '\u2014'}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  {wb.wpm !== null ? `${wb.completionTime}s · WPM` : 'WPM'}
+                  {wb.wpm !== null && wb.completionTime !== null
+                    ? `${Number(wb.completionTime).toFixed(1)}s · WPM`
+                    : 'WPM'}
                 </div>
               </div>
             ))}

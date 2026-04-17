@@ -1,18 +1,5 @@
 import type { MetadataRoute } from 'next';
-
-/**
- * Resolve the canonical base URL used in the sitemap. We prefer the
- * `SITE_URL` env var (settable per-environment), fall back to Vercel's
- * built-in `VERCEL_URL`, and finally default to the production domain.
- * Each fallback is wrapped in a try so mis-configured envs never crash
- * the build.
- */
-function getBaseUrl(): string {
-  const fromEnv = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL;
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return 'https://typeracer-pro.fly.dev';
-}
+import { getBaseUrl } from '@/lib/url';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = getBaseUrl();

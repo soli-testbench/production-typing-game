@@ -5,11 +5,13 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { usePlayer } from '@/components/PlayerProvider';
 import { NameEntryModal } from '@/components/NameEntryModal';
+import { useHelpOverlay } from '@/components/HelpOverlayProvider';
 
 export function Navigation() {
   const pathname = usePathname();
   const { playerName } = usePlayer();
   const [showNameModal, setShowNameModal] = useState(false);
+  const { openOverlay } = useHelpOverlay();
 
   const linkClass = (path: string) =>
     `transition-colors duration-200 px-3 py-2 rounded-lg text-sm font-medium ${
@@ -45,15 +47,26 @@ export function Navigation() {
               </Link>
             </div>
 
-            <button
-              onClick={() => setShowNameModal(true)}
-              className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-800/30"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <span className="hidden sm:inline">{playerName || 'Set Name'}</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={openOverlay}
+                aria-label="Show keyboard shortcuts"
+                title="Keyboard shortcuts (?)"
+                className="flex items-center justify-center w-8 h-8 text-sm text-gray-400 hover:text-neon-blue transition-colors rounded-lg hover:bg-gray-800/30 border border-gray-800 hover:border-neon-blue/30"
+              >
+                <span className="font-bold text-sm" aria-hidden="true">?</span>
+              </button>
+              <button
+                onClick={() => setShowNameModal(true)}
+                className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-800/30"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <span className="hidden sm:inline">{playerName || 'Set Name'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </nav>
