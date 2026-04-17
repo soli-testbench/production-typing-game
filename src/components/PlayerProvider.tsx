@@ -9,6 +9,7 @@ interface PlayerContextType {
   anonymousId: string;
   setPlayerName: (name: string) => void;
   isNameSet: boolean;
+  resetIdentity: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextType>({
@@ -16,6 +17,7 @@ const PlayerContext = createContext<PlayerContextType>({
   anonymousId: '',
   setPlayerName: () => {},
   isNameSet: false,
+  resetIdentity: () => {},
 });
 
 export function usePlayer() {
@@ -98,16 +100,46 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Clears the stored identity (anonymousId + playerName) from localStorage
+  // and generates a fresh anonymousId in memory so subsequent requests (and
+  // the next page load) act as a brand-new player. Used by the "Delete My
+  // Data" flow after a successful server-side deletion.
+  const resetIdentity = useCallback(() => {
+    if (storageAvailableRef.current) {
+      try {
+        localStorage.removeItem('anonymousId');
+      } catch {
+        console.warn('Failed to remove anonymousId from localStorage');
+      }
+      try {
+        localStorage.removeItem('playerName');
+      } catch {
+        console.warn('Failed to remove playerName from localStorage');
+      }
+    }
+    const newId = uuidv4();
+    if (storageAvailableRef.current) {
+      try {
+        localStorage.setItem('anonymousId', newId);
+      } catch {
+        console.warn('Failed to persist new anonymousId to localStorage');
+      }
+    }
+    setAnonymousId(newId);
+    setPlayerNameState('');
+    setIsNameSet(false);
+  }, []);
+
   if (!mounted) {
     return (
-      <PlayerContext.Provider value={{ playerName: '', anonymousId: '', setPlayerName, isNameSet: false }}>
+      <PlayerContext.Provider value={{ playerName: '', anonymousId: '', setPlayerName, isNameSet: false, resetIdentity }}>
         {children}
       </PlayerContext.Provider>
     );
   }
 
   return (
-    <PlayerContext.Provider value={{ playerName, anonymousId, setPlayerName, isNameSet }}>
+    <PlayerContext.Provider value={{ playerName, anonymousId, setPlayerName, isNameSet, resetIdentity }}>
       {children}
     </PlayerContext.Provider>
   );
