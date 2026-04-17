@@ -35,6 +35,31 @@ const durations = [
   { label: '100w', value: 'words-100' },
 ];
 
+/**
+ * Derive the filter-tab label for a leaderboard row. Mirrors the `durations`
+ * array above: word-count modes use the `NNw` convention, timed modes use
+ * the `NNs` duration. Kept in one place so the badge rendered on the "All"
+ * view always matches what the user clicked on to get there.
+ */
+function modeBadgeLabel(entry: { game_mode?: string; duration_seconds: number }): string {
+  if (entry.game_mode && entry.game_mode.startsWith('words-')) {
+    return `${entry.game_mode.replace('words-', '')}w`;
+  }
+  return `${entry.duration_seconds}s`;
+}
+
+/**
+ * Color-code the badge so word modes and timed modes are visually distinct
+ * at a glance, while still reading as muted accent tags that don't pull
+ * focus from the primary WPM column.
+ */
+function modeBadgeClasses(entry: { game_mode?: string }): string {
+  const isWordMode = !!entry.game_mode && entry.game_mode.startsWith('words-');
+  return isWordMode
+    ? 'bg-neon-blue/15 text-neon-blue border border-neon-blue/30'
+    : 'bg-neon-purple/15 text-neon-purple border border-neon-purple/30';
+}
+
 export default function LeaderboardPage() {
   const { anonymousId } = usePlayer();
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
@@ -184,6 +209,18 @@ export default function LeaderboardPage() {
                       </span>
                       {isCurrentPlayer && (
                         <span className="ml-2 text-xs text-neon-blue/60">(you)</span>
+                      )}
+                      {/* Mode badge — only shown on the "All" view, where
+                          rows mix different game modes. When a specific
+                          filter is active every row has the same mode so
+                          the badge would be redundant noise. */}
+                      {selectedDuration === '' && (
+                        <span
+                          className={`ml-2 inline-block px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded align-middle ${modeBadgeClasses(entry)}`}
+                          aria-label={`Game mode ${modeBadgeLabel(entry)}`}
+                        >
+                          {modeBadgeLabel(entry)}
+                        </span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-right">

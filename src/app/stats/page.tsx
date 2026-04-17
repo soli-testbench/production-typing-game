@@ -16,6 +16,18 @@ interface ScoreEntry {
   username: string;
 }
 
+interface ScoresSummary {
+  totalGames: number;
+  averageWpm: number;
+  averageAccuracy: number;
+  totalTimeSeconds: number;
+  totalCharacters: number;
+  bestWpm: number;
+  bestAccuracy: number;
+}
+
+const PAGE_SIZE = 50;
+
 interface TrendMode {
   key: string;
   label: string;
@@ -348,22 +360,36 @@ function WpmTrendChart({ scores }: { scores: ScoreEntry[] }) {
 }
 
 export default function StatsPage() {
-  const { anonymousId } = usePlayer();
+  const { anonymousId, resetIdentity } = usePlayer();
   const [scores, setScores] = useState<ScoreEntry[]>([]);
+  const [summary, setSummary] = useState<ScoresSummary | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  // After a successful deletion we hold the "empty" state locally so the
+  // UI doesn't flash the pre-delete content while the component re-renders
+  // with the freshly regenerated anonymousId from PlayerProvider.
+  const [justDeleted, setJustDeleted] = useState(false);
 
-  const fetchScores = useCallback(async () => {
+  const fetchScores = useCallback(async (pageIndex: number) => {
     if (!anonymousId) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/scores', {
+      const offset = pageIndex * PAGE_SIZE;
+      const url = `/api/scores?offset=${offset}&limit=${PAGE_SIZE}`;
+      const res = await fetch(url, {
         headers: { 'X-Anonymous-Id': anonymousId },
       });
       if (!res.ok) throw new Error('Failed to fetch scores');
       const data = await res.json();
       setScores(data.scores || []);
+      setSummary(data.summary || null);
+      setTotal(typeof data.total === 'number' ? data.total : 0);
     } catch {
       setError('Failed to load your stats. Please try again.');
     } finally {
@@ -372,8 +398,53 @@ export default function StatsPage() {
   }, [anonymousId]);
 
   useEffect(() => {
-    fetchScores();
-  }, [fetchScores]);
+    if (justDeleted) return;
+    fetchScores(page);
+  }, [fetchScores, page, justDeleted]);
+
+  // Reset the visible page when the player changes (e.g. after a delete
+  // regenerates the anonymousId) so we always land on page 1 for the new
+  // identity.
+  useEffect(() => {
+    setPage(0);
+  }, [anonymousId]);
+
+  const handleDelete = async () => {
+    if (!anonymousId) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const res = await fetch('/api/scores', {
+        method: 'DELETE',
+        headers: { 'X-Anonymous-Id': anonymousId },
+      });
+      if (!res.ok) {
+        let message = 'Failed to delete your data. Please try again.';
+        try {
+          const body = await res.json();
+          if (body && typeof body.error === 'string') message = body.error;
+        } catch {
+          /* ignore JSON parse errors */
+        }
+        setDeleteError(message);
+        setDeleting(false);
+        return;
+      }
+      // Optimistically clear UI state before regenerating the identity so
+      // the empty-state renders immediately.
+      setScores([]);
+      setSummary(null);
+      setTotal(0);
+      setPage(0);
+      setJustDeleted(true);
+      setDeleteOpen(false);
+      setDeleting(false);
+      resetIdentity();
+    } catch {
+      setDeleteError('Failed to delete your data. Please try again.');
+      setDeleting(false);
+    }
+  };
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -384,7 +455,10 @@ export default function StatsPage() {
     });
   };
 
-  // Personal bests per duration (timed modes)
+  // Personal bests per duration (timed modes). These are still computed
+  // client-side from the current page of scores as a best-effort display.
+  // The primary summary cards above them use the server-side aggregates
+  // (which cover ALL scores, not just the current page).
   const durations = [15, 30, 60, 120];
   const personalBests = durations.map((d) => {
     const filtered = scores.filter((s) => s.duration_seconds === d && (!s.game_mode || s.game_mode === 'classic'));
@@ -407,34 +481,19 @@ export default function StatsPage() {
     return { mode, label, wpm: best.wpm, completionTime: best.duration_seconds };
   });
 
-  // Total games and total time
-  const totalGames = scores.length;
-  const totalTimeSeconds = scores.reduce((sum, s) => sum + s.duration_seconds, 0);
+  // Summary cards source of truth: server-side aggregates computed over
+  // ALL of the player's scores (not just the current page). Fall back to
+  // zeros when the server hasn't responded with a summary yet.
+  const totalGames = summary?.totalGames ?? 0;
+  const totalTimeSeconds = summary?.totalTimeSeconds ?? 0;
   const totalMinutes = Math.floor(totalTimeSeconds / 60);
-
-  // Average WPM and accuracy
-  const averageWpm = totalGames > 0
-    ? Math.round(scores.reduce((sum, s) => sum + s.wpm, 0) / totalGames)
-    : 0;
-  const averageAccuracy = totalGames > 0
-    ? (scores.reduce((sum, s) => sum + Number(s.accuracy), 0) / totalGames).toFixed(1)
+  const averageWpm = summary?.averageWpm ?? 0;
+  const averageAccuracy = summary
+    ? summary.averageAccuracy.toFixed(1)
     : '0.0';
-
-  // Total characters typed across all games (correct + incorrect).
-  const totalCharactersTyped = scores.reduce(
-    (sum, s) => sum + (s.correct_chars || 0) + (s.incorrect_chars || 0),
-    0
-  );
-
-  // Best single-game highlights (best WPM and best accuracy across *any*
-  // mode/duration). Useful as an at-a-glance personal-best summary in
-  // addition to the per-duration / per-word-count breakdowns below.
-  const bestSingleGameWpm = totalGames > 0
-    ? scores.reduce((best, s) => (s.wpm > best ? s.wpm : best), 0)
-    : 0;
-  const bestSingleGameAccuracy = totalGames > 0
-    ? scores.reduce((best, s) => (Number(s.accuracy) > best ? Number(s.accuracy) : best), 0)
-    : 0;
+  const totalCharactersTyped = summary?.totalCharacters ?? 0;
+  const bestSingleGameWpm = summary?.bestWpm ?? 0;
+  const bestSingleGameAccuracy = summary?.bestAccuracy ?? 0;
 
   // Improvement rate: compare the average WPM of the 5 most-recent games
   // against the 5 games immediately before them. The scores array is
@@ -481,7 +540,7 @@ export default function StatsPage() {
         <div className="text-center py-20">
           <p className="text-red-400">{error}</p>
           <button
-            onClick={fetchScores}
+            onClick={() => fetchScores(page)}
             className="mt-4 px-4 py-2 text-sm bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors"
           >
             Retry
@@ -667,7 +726,129 @@ export default function StatsPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination controls */}
+          {total > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-4 mb-12">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0 || loading}
+                className="px-4 py-2 text-sm bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                &larr; Previous
+              </button>
+              <span className="text-xs text-gray-500 tabular-nums">
+                Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+                <span className="hidden sm:inline">
+                  {' '}
+                  &middot; Showing {page * PAGE_SIZE + 1}
+                  &ndash;
+                  {Math.min(total, page * PAGE_SIZE + scores.length)} of {total}
+                </span>
+              </span>
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={(page + 1) * PAGE_SIZE >= total || loading}
+                className="px-4 py-2 text-sm bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next &rarr;
+              </button>
+            </div>
+          )}
+
+          {/* Danger zone: delete personal data */}
+          <div className="mt-12 border-t border-gray-800 pt-8">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-2">
+              Danger Zone
+            </h2>
+            <div className="bg-gray-900/50 border border-red-500/20 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <div className="text-gray-300 text-sm font-medium">Delete My Data</div>
+                <div className="text-gray-500 text-xs mt-1">
+                  Permanently remove all your scores and reset your local identity. This cannot be undone.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError('');
+                  setDeleteOpen(true);
+                }}
+                className="px-4 py-2 text-sm bg-red-500/20 text-red-300 border border-red-500/40 rounded-lg hover:bg-red-500/30 transition-colors font-medium"
+              >
+                Delete My Data
+              </button>
+            </div>
+          </div>
         </>
+      )}
+
+      {/* Show the danger zone on the empty state too when the user has
+          just deleted their data (rare path) or when they've played no
+          games yet but still want to reset the local identity. */}
+      {!loading && !error && scores.length === 0 && !justDeleted && total === 0 && (
+        <div className="mt-12 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError('');
+              setDeleteOpen(true);
+            }}
+            className="text-xs text-gray-600 hover:text-gray-400 underline underline-offset-2"
+          >
+            Delete My Data
+          </button>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-data-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+          onClick={() => {
+            if (!deleting) setDeleteOpen(false);
+          }}
+        >
+          <div
+            className="bg-gray-900 border border-red-500/40 rounded-xl p-6 max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="delete-data-title" className="text-lg font-semibold text-red-400 mb-2">
+              Delete your data?
+            </h3>
+            <p className="text-sm text-gray-400 mb-4">
+              This will permanently remove <strong>all</strong> of your scores from the
+              leaderboard and clear your local identity. You will get a brand-new anonymous
+              ID on your next game. This action is irreversible.
+            </p>
+            {deleteError && (
+              <p className="text-sm text-red-400 mb-3" role="alert">
+                {deleteError}
+              </p>
+            )}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(false)}
+                disabled={deleting}
+                className="px-4 py-2 text-sm bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 text-sm bg-red-500/30 text-red-200 border border-red-500/50 rounded-lg hover:bg-red-500/40 transition-colors disabled:opacity-50 font-semibold"
+              >
+                {deleting ? 'Deleting…' : 'Yes, delete everything'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

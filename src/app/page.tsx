@@ -1,5 +1,33 @@
 import Link from 'next/link';
 
+function getBaseUrl(): string {
+  const fromEnv = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, '');
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return 'https://typeracer-pro.fly.dev';
+}
+
+// JSON-LD structured data for the home page. Rendered inline as a
+// <script type="application/ld+json"> tag so crawlers (Google, Bing, etc.)
+// can index TypeRacer Pro as a WebApplication entity. Schema reference:
+// https://schema.org/WebApplication
+const homeJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: 'TypeRacer Pro',
+  description:
+    'Test and improve your typing speed with TypeRacer Pro. Multiple game modes, real-time WPM tracking, and global leaderboards.',
+  url: getBaseUrl(),
+  applicationCategory: 'GameApplication',
+  operatingSystem: 'Any',
+  browserRequirements: 'Requires JavaScript and a modern browser.',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
+
 const gameModes = [
   {
     title: '15 Seconds',
@@ -81,6 +109,11 @@ const wordModes = [
 export default function HomePage() {
   return (
     <div className="flex flex-col items-center animate-fade-in">
+      {/* JSON-LD WebApplication structured data for SEO / rich results. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(homeJsonLd) }}
+      />
       {/* Hero Section */}
       <div className="text-center mb-16 mt-8">
         <h1 className="text-5xl md:text-7xl font-bold mb-4">

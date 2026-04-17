@@ -157,6 +157,12 @@ export function TypingGame({
   const [typed, setTyped] = useState('');
   const [gameState, setGameState] = useState<GameState>('waiting');
   const [timeLeft, setTimeLeft] = useState(duration);
+  // Fractional 0..100 progress for the time-mode progress bar, updated
+  // from wall-clock each timer tick. Tracked separately from `timeLeft`
+  // (which is the ceil'd integer used for the visible countdown text) so
+  // the bar animates continuously while the digits still step by whole
+  // seconds. In word/custom modes this value is unused.
+  const [timeProgressPercent, setTimeProgressPercent] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [result, setResult] = useState<GameResult | null>(null);
@@ -243,6 +249,10 @@ export function TypingGame({
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    // Snap the time-mode progress bar to 100% so it lands fully filled
+    // when the countdown elapses, without an extra late tick from the
+    // cleared interval.
+    setTimeProgressPercent(100);
     const completionTimeSeconds = startTime ? (Date.now() - startTime) / 1000 : 0;
     // Word mode and custom-text mode are both count-up "finish the passage"
     // games — their duration is the wall-clock time it took to finish, not
@@ -294,6 +304,7 @@ export function TypingGame({
     setTyped('');
     setGameState('waiting');
     setTimeLeft(dur);
+    setTimeProgressPercent(0);
     setElapsedTime(0);
     setStartTime(null);
     setResult(null);
@@ -329,11 +340,21 @@ export function TypingGame({
     } else {
       // Countdown timer derived from wall-clock elapsed time to avoid drift
       setTimeLeft(currentDuration);
+      setTimeProgressPercent(0);
       timerRef.current = setInterval(() => {
         const elapsedSec = (Date.now() - now) / 1000;
         const remaining = Math.max(0, currentDuration - elapsedSec);
         // Round up so the displayed countdown only hits 0 once the real time has elapsed
         setTimeLeft(Math.ceil(remaining));
+        // Fractional progress for the bar — derived from wall clock so it
+        // advances smoothly between whole-second timer ticks. Paired with
+        // a linear CSS transition on the bar's width (see JSX) for
+        // continuous motion without per-frame state updates.
+        setTimeProgressPercent(
+          currentDuration > 0
+            ? Math.min(100, Math.max(0, (elapsedSec / currentDuration) * 100))
+            : 100
+        );
       }, 200);
     }
   }, [currentDuration, isWordMode, isCustomMode]);
@@ -600,9 +621,10 @@ export function TypingGame({
       if (!currentPassage || currentPassage.length === 0) return 0;
       return Math.min(100, Math.max(0, (typed.length / currentPassage.length) * 100));
     }
-    if (currentDuration <= 0) return 0;
-    const elapsed = currentDuration - timeLeft;
-    return Math.min(100, Math.max(0, (elapsed / currentDuration) * 100));
+    // Time mode: drive off the wall-clock-derived fractional value so the
+    // bar animates continuously, not in the 1-second steps the ceil'd
+    // `timeLeft` integer would produce.
+    return timeProgressPercent;
   })();
 
   if (result && gameState === 'finished') {
@@ -852,7 +874,10 @@ export function TypingGame({
         )}
       </div>
 
-      {/* Overall progress bar — time-based for time mode, word-based for word mode */}
+      {/* Overall progress bar — time-based for time mode, word-based for word mode.
+          In time mode the inner bar uses a linear CSS transition matching the
+          timer tick interval (200ms) so the width interpolates smoothly between
+          updates instead of visibly stepping each second. */}
       <div
         className="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden"
         role="progressbar"
@@ -862,7 +887,11 @@ export function TypingGame({
         aria-label={isWordMode ? 'Words completed' : isCustomMode ? 'Passage progress' : 'Time elapsed'}
       >
         <div
-          className="h-full bg-gradient-to-r from-neon-blue via-neon-purple to-neon-pink transition-all duration-200 ease-out"
+          className={`h-full bg-gradient-to-r from-neon-blue via-neon-purple to-neon-pink ${
+            isWordMode || isCustomMode
+              ? 'transition-all duration-200 ease-out'
+              : 'transition-[width] duration-200 ease-linear'
+          }`}
           style={{ width: `${overallProgressPercent}%` }}
         />
       </div>
