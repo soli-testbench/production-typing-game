@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { passages } from '@/data/passages';
 import { ResultsScreen } from '@/components/ResultsScreen';
 import { GameResult, TroubleCharacter } from '@/types/game';
 import { calculateWpm, calculateRawWpm, calculateAccuracy } from '@/lib/typing-utils';
+import { useHelpOverlay } from '@/components/HelpOverlayProvider';
 
 const TROUBLE_CHARACTERS_LIMIT = 5;
 
@@ -173,6 +175,33 @@ export function TypingGame({
   // Custom-text mode is always in practice mode (scores are never saved)
   // regardless of what was passed via `initialPracticeMode`.
   const [practiceMode, setPracticeMode] = useState(isCustomMode ? true : initialPracticeMode);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { open: helpOpen } = useHelpOverlay();
+  const helpOpenRef = useRef(helpOpen);
+  useEffect(() => {
+    helpOpenRef.current = helpOpen;
+  }, [helpOpen]);
+  // Sync the `?practice=true/false` URL param with the current toggle
+  // state so practice mode persists across page refreshes (e.g. the
+  // browser reloads the tab) and across navigations to the same game
+  // URL. Custom-text mode is always practice mode and intentionally
+  // does not mutate the URL — its parent screen owns the mode.
+  useEffect(() => {
+    if (isCustomMode) return;
+    const current = searchParams.get('practice');
+    const currentIsPractice = current === 'true' || current === '1';
+    if (currentIsPractice === practiceMode) return;
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    if (practiceMode) {
+      params.set('practice', 'true');
+    } else {
+      params.delete('practice');
+    }
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [practiceMode, isCustomMode, router, pathname, searchParams]);
   const [pasteBlocked, setPasteBlocked] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -479,6 +508,9 @@ export function TypingGame({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (gameState === 'finished') return;
+    // Do not interpret keystrokes as gameplay input while the help
+    // overlay is open — the user is reading shortcuts, not typing.
+    if (helpOpenRef.current) return;
 
     const value = e.target.value;
 

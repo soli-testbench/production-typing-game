@@ -1,11 +1,5 @@
 import Link from 'next/link';
-
-function getBaseUrl(): string {
-  const fromEnv = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL;
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return 'https://typeracer-pro.fly.dev';
-}
+import { getBaseUrl } from '@/lib/url';
 
 // JSON-LD structured data for the home page. Rendered inline as a
 // <script type="application/ld+json"> tag so crawlers (Google, Bing, etc.)

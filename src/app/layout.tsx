@@ -3,6 +3,7 @@ import { Fira_Code } from 'next/font/google';
 import './globals.css';
 import { Navigation } from '@/components/Navigation';
 import { PlayerProvider } from '@/components/PlayerProvider';
+import { HelpOverlayProvider } from '@/components/HelpOverlayProvider';
 
 const firaCode = Fira_Code({
   subsets: ['latin'],
@@ -47,10 +48,12 @@ export default function RootLayout({
     <html lang="en" className={firaCode.variable}>
       <body className={`${firaCode.className} min-h-screen bg-gray-950 text-gray-100 font-mono antialiased`}>
         <PlayerProvider>
-          <Navigation />
-          <main className="container mx-auto px-4 py-8 max-w-6xl">
-            {children}
-          </main>
+          <HelpOverlayProvider>
+            <Navigation />
+            <main className="container mx-auto px-4 py-8 max-w-6xl">
+              {children}
+            </main>
+          </HelpOverlayProvider>
         </PlayerProvider>
       </body>
     </html>
